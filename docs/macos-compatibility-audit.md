@@ -122,4 +122,6 @@ GPU 的主要代价在本地执行。安装器绑定 LOCALAPPDATA、`pythonw.exe
 | `node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs` | 共 48 项（含上述 6 项），47 通过，0 失败，1 跳过。模拟宿主注册 5 个命令，两个预览页面可访问，GPU 启动计数为 0。 |
 | Windows 专用集成测试 | 需要在已安装 Orca CLI 和系统 OpenSSH 的 Windows 上运行原生程序。该用例保留在全量套件中，仅在 Windows 上执行。本次通过的是 Windows 适配夹具及模拟 GPU 启动回归。 |
 
-**待审查及人工验收。** 需在 Windows 运行同一套件并留下原生探针结果。独立审查后，由用户决定是否在 Orca UI 审核插件并验证激活、停用和真实目录对话框的选择、取消及权限拒绝。获准 worker 的实际环境、非默认 profile 和 Intel Mac 仍未验证。配对握手、账号授权与用量、真实下载和各 GPU 后端分别留待后续阶段单独验收。
+**阶段 1 测试范围确认（2026-11-04）。** 用户确认本阶段不测试 Windows 相关功能。上表如实保留范围确认前在 Mac 上运行的夹具和模拟启动结果。Windows 原生探针未运行，Windows 功能不作为本阶段验收或合并条件，不安排补测。Windows 代码和已有测试用例继续保留，实机兼容性未经本次验证。
+
+**待审查及人工验收。** 独立审查后，由用户决定是否在 Orca UI 审核插件并验证激活、停用和真实目录对话框的选择、取消及权限拒绝。获准 worker 的实际环境、非默认 profile 和 Intel Mac 仍未验证。配对握手、账号授权与用量、真实下载和各 GPU 后端分别留待后续阶段单独验收。

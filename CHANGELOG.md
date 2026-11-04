@@ -4,7 +4,7 @@
 
 - Toolkit 入口和管理服务共用平台 runtime。Mac 按运行中的 Orca 包、已审计的相对布局及 profile 定位 CLI 和 SDK，使用私有数据目录与系统 OpenSSH。
 - Mac 可打开 Accounts 和 Downloads 预览页面并选择本地目录。真实远程操作和 GPU 启动已在服务端关闭，Windows 保留原目录及 GPU 启动行为。
-- 新增平台和模拟激活测试。Apple Silicon 上全量 Node 套件 47 项通过、1 项 Windows 原生探针待实机运行。
+- 新增平台和模拟激活测试。Apple Silicon 上全量 Node 套件 47 项通过、1 项 Windows 原生探针跳过。按用户确认，阶段 1 不测试 Windows 相关功能，不要求 Windows 实机补测。
 
 ## 2026-10-29 — Tripo Studio / MCP 1.7.1
 
