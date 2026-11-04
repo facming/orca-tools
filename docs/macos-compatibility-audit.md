@@ -101,3 +101,25 @@ GPU 的主要代价在本地执行。安装器绑定 LOCALAPPDATA、`pythonw.exe
 3. 对路径空格/中文、CLI/SDK 缺失、替代 profile、权限拒绝、选择取消及子进程环境做离线测试。确保 Mac 能力缺失时关闭对应功能，避免入口顺带启动 GPU；在 Windows 上通过已有回归。阶段 1 的验收限于平台接口，Accounts 真实读取、下载和渲染分别在后续阶段执行。
 
 本次仅新增本报告。未安装、启用或批准插件，未使用真实账号或凭据，未创建密钥、监听、LaunchAgent，未修改应用包、TCC、PF、防火墙、Tailscale 或系统扩展。报告留在方案分支工作区，未暂存、提交、推送或创建 PR；等待 ChatGPT 审查及用户下一阶段指令。
+
+## 7. 阶段 1 实施记录（2026-11-04）
+
+本节基于阶段 0 提交 `e20df27`。Toolkit 现在使用同一个平台 runtime 初始化管理服务、Accounts、Downloads、目录选择和 GPU 模块。Windows 沿用原设置、下载任务及 GPU 安装目录，启用 GPU 时保留启动动作。Mac 管理页面仅监听 IPv4 回环，Accounts 和 Downloads 显示为预览。服务端拦截账号、远程浏览、传输和 GPU 管理操作，目录选择及本地偏好可以单独使用。
+
+| 检查对象 | 实现与证据 |
+| --- | --- |
+| CLI / SDK | 从实际 worker 可执行文件向上核对 app 的包标识，再对照 Spotlight 与系统、用户应用目录中的候选项。只在该包内使用第 2 节记录的相对布局，检查 CLI 执行权限及 SDK 的构造器和调用方法。无法识别宿主、发现多个安装或布局不兼容时停止初始化。 |
+| Profile | 显式覆盖须指向可访问的绝对目录。否则使用 SDK 默认值或已验证的 darwin 路径。复查当前构建的安装器发现，审核后的入口在 `<PROFILE>/plugins/local-tools.toolkit/<contentHash>/` 下。入口与默认 profile 不匹配时停止，避免从另一份 profile 查配对。真实宿主能否传递显式覆盖仍待核实。 |
+| 目录与进程 | 由 `os.homedir()` 推导 Toolkit 的 Application Support、Caches 和 Logs 路径。实际使用的私有数据目录以 0700 创建，拒绝属主不符、符号链接或组及其他用户可访问的目录。本地配置及目录偏好以 0600 创建。Mac 子进程仅继承指定环境字段，使用系统 OpenSSH，打开页面和目录均以参数数组调用系统 open。 |
+| 目录选择 | 在本版本公开的 worker API 和方法定义中未发现原生目录选择接口。使用固定 AppleScript，初始目录作为单独参数传入。取消与执行失败分别处理，选择结果只保存本地路径。 |
+| 错误处理 | 管理服务向页面返回固定诊断，屏蔽文件系统异常、解析异常和外部命令输出。下载错误的历史自由文本在加载时不再传给页面。 |
+
+**安全验证。** 在临时 HOME、隔离 profile 下，用本机 Orca 1.4.248 的随包 Node 成功解析 CLI 和 SDK，分别检查了显式覆盖和模拟安装目录下的 SDK 默认 profile。CLI 版本检查通过，官方离线插件校验为 valid，0 个错误，仍需人工审核。系统 AppleScript 编译器接受选择脚本。这些探针没有激活真实 worker、创建 SSH 密钥、连接远程环境或启动 GPU 进程。
+
+| Node.js 20.20.2 / Apple Silicon | 结果 |
+| --- | --- |
+| `node --test plugins/toolkit/test-platform.cjs` | 6/6 通过。包含临时 Windows 安装布局、Mac 路径及权限、多安装、SDK 导出与 profile、子进程参数、目录选择和模拟激活。 |
+| `node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs` | 共 48 项（含上述 6 项），47 通过，0 失败，1 跳过。模拟宿主注册 5 个命令，两个预览页面可访问，GPU 启动计数为 0。 |
+| Windows 专用集成测试 | 需要在已安装 Orca CLI 和系统 OpenSSH 的 Windows 上运行原生程序。该用例保留在全量套件中，仅在 Windows 上执行。本次通过的是 Windows 适配夹具及模拟 GPU 启动回归。 |
+
+**待审查及人工验收。** 需在 Windows 运行同一套件并留下原生探针结果。独立审查后，由用户决定是否在 Orca UI 审核插件并验证激活、停用和真实目录对话框的选择、取消及权限拒绝。获准 worker 的实际环境、非默认 profile 和 Intel Mac 仍未验证。配对握手、账号授权与用量、真实下载和各 GPU 后端分别留待后续阶段单独验收。

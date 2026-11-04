@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-04 — macOS 移植阶段 1 开发记录
+
+- Toolkit 入口和管理服务共用平台 runtime。Mac 按运行中的 Orca 包、已审计的相对布局及 profile 定位 CLI 和 SDK，使用私有数据目录与系统 OpenSSH。
+- Mac 可打开 Accounts 和 Downloads 预览页面并选择本地目录。真实远程操作和 GPU 启动已在服务端关闭，Windows 保留原目录及 GPU 启动行为。
+- 新增平台和模拟激活测试。Apple Silicon 上全量 Node 套件 47 项通过、1 项 Windows 原生探针待实机运行。
+
 ## 2026-10-29 — Tripo Studio / MCP 1.7.1
 
 - GPU 模块加入 `tripo-local`：经桥调用本机的 Tripo Studio 会员账号（第三方插件 Ador-able/tripo-studio-mcp），工具列表运行时从桥上拉取，另有 `tripo_upload`、`tripo_download` 传文件。

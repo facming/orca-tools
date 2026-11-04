@@ -3,7 +3,7 @@ const fs=require('node:fs'),os=require('node:os'),path=require('node:path'),cryp
 const {DownloadManager,Semaphore,safeName,chunkSize}=require('./engine.cjs');
 const {startServer}=require('./server.cjs');
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-test('Orca filtered worker environment resolves CLI and Windows tools',async()=>{
+test('Orca filtered worker environment resolves CLI and Windows tools',{skip:process.platform!=='win32'&&'requires installed Windows Orca and OpenSSH'},async()=>{
  const {windowsRuntime,launch}=require('./runtime.cjs');
  const allowed=['PATH','HOME','USERPROFILE','LANG','LC_ALL','LC_CTYPE','TZ','TMPDIR','TEMP','TMP','SYSTEMROOT','SYSTEMDRIVE','WINDIR','COMSPEC','PATHEXT','PROCESSOR_ARCHITECTURE','NUMBER_OF_PROCESSORS'];
  const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>allowed.some(name=>name.toUpperCase()===key.toUpperCase())));
