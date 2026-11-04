@@ -56,7 +56,7 @@
 
 1. Mac Orca 版本、插件 manifest/API 兼容性和插件加载实测。
 2. Orca app bundle、CLI、RuntimeClient SDK、数据目录的真实定位依据；报告需脱敏，不输出用户隐私路径或凭据。
-3. 插件激活、远程 environment 连接和只读 RPC 的测试结果。
+3. 插件激活、远程 environment 连接和只读 RPC 传输层的测试结果。不得调用 accounts.list 或用量接口、不得读取/输出真实账号邮箱和用量；如确需验证真实账号 RPC，先向用户申请明确授权。
 4. Node.js、Python、OpenSSH、Tailscale 的可用性和版本，不包含密钥/token。
 5. 当前源码 Windows 专属依赖清单，按 Accounts、Downloads、GPU 分类。
 6. Apple Silicon/Intel 架构和 GPU backend 能力（只报告实际检测结果）。
