@@ -21,6 +21,6 @@ function compose(initial='overview'){
   const markup=JSON.stringify('<style>'+f.style+'\n'+skin+'</style>'+f.content).replaceAll('<','\\u003c');
   return `window.toolkitModules.${name}=()=>{const host=window.document.getElementById('${name}-module');const root=host.attachShadow({mode:'open'});root.innerHTML=${markup};const document={getElementById:id=>root.getElementById(id),querySelector:q=>root.querySelector(q),createElement:tag=>window.document.createElement(tag),createTextNode:text=>window.document.createTextNode(text),get visibilityState(){return !host.hidden&&window.document.visibilityState==='visible'?'visible':'hidden';}};${script}\n};`;
  }).join('\n');
- return shell.replace('__MODULE_SCRIPTS__',scripts).replace('__INITIAL_VIEW__',initial);
+ return shell.replace('__TOOLKIT_VERSION__',require('./orca-plugin.json').version).replace('__MODULE_SCRIPTS__',scripts).replace('__INITIAL_VIEW__',initial);
 }
 module.exports={compose,fragment};

@@ -203,6 +203,8 @@ test('macOS activation shares one runtime, serves local previews and cannot star
     assert.equal(launched.at(-1), url + '#' + name);
     assert.equal((await fetch(url + name + '/')).status, 200);
   }
+  await commands.get('toolkit.gpu')({});
+  assert.equal(launched.at(-1), url + '#workflows');
   const html = await (await fetch(url)).text();
   const headers = {'X-Toolkit-Token': html.match(/const token='([a-f0-9]+)'/)[1], Origin: new URL(url).origin, 'Content-Type': 'application/json'};
   const state = await (await fetch(url + 'api/status', {headers})).json();
@@ -232,4 +234,6 @@ test('macOS activation shares one runtime, serves local previews and cannot star
   assert.equal(jobs.preview, true);
   assert.equal(service.controller.downloads, null);
   assert.equal(openGpu.mock.callCount(), 0);
+  await plugin.deactivate();
+  await assert.rejects(fetch(url), /fetch failed/);
 });

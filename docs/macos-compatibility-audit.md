@@ -126,4 +126,8 @@ GPU 的主要代价在本地执行。安装器绑定 LOCALAPPDATA、`pythonw.exe
 
 **管理页验收反馈。** 人工截图显示 Overview 的 Downloads 卡片停留在 “Active transfers”，同页模块状态已为 preview。修正卡片的预览文案，并在 Downloads 表单内显示可见提示。使用临时数据目录和独立 Chrome 配置验证了两处实际渲染结果，下载按钮禁用，本地目录选择按钮可用。已安装插件的更新与复验仍需通过 Orca UI。
 
-**待审查及人工验收。** 独立审查后，由用户决定是否在 Orca UI 审核插件并验证激活、停用和真实目录对话框的选择、取消及权限拒绝。获准 worker 的实际环境、非默认 profile 和 Intel Mac 仍未验证。配对握手、账号授权与用量、真实下载和各 GPU 后端分别留待后续阶段单独验收。
+**管理页逐项复核。** 实际 Orca 插件设置显示 Toolkit 1.3.1、本地来源、普通程序执行能力、桌面通知及五个命令。“Open Manager” 从获准 worker 打开回环管理页。旧界面将 GPU 显示为 Creative tools，页脚写死了 v1.2.1，总览刷新还会把 Accounts 的 preview 覆盖为 Unavailable。修复版导航注明 GPU projects 和 GPU workflows，Connected tools 标明 GPU。两个 GPU 子页显示 unsupported，隐藏启动操作。总览在预览模式下跳过账号计数和不支持的 GPU 查询，页脚版本取自 manifest。
+
+在独立数据目录的实际浏览器页面逐项验证了总览、Accounts、Downloads 和两个 GPU 入口。以替代选择器完成含中文和空格的目录选择、取消和刷新，路径保留。本机已安装版的 Downloads 按钮触发了真实 osascript 目录选择进程，未确认该次选择保存或原生取消结果。手动切换真实 Orca 插件开关至关闭后，再次确认管理端口拒绝连接，GPU 管理端口亦未监听。另观察到一次开关仍显示开启但管理端口已关闭，重新运行命令可恢复。当前 Orca 代码存在空闲 worker 回收机制，缺少本次具体退出原因的证据。
+
+**待审查及人工验收。** 最新修复仍需在实际安装版复核。真实目录选择的保存、取消、TCC 拒绝和管理页长时间驻留有待确认。非默认 profile、Intel Mac、配对握手、账号与远程下载、GPU 执行仍留待后续阶段。
