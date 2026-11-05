@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
 const {validRemote}=require('./remote-browser.cjs');
-function valid(folder){return typeof folder==='string'&&path.isAbsolute(folder)&&folder.length<=220&&!/[\x00-\x1f]/.test(folder);}
+function valid(folder){return typeof folder==='string'&&path.isAbsolute(folder)&&folder.length<=4096&&!/[\x00-\x1f]/.test(folder);}
 function read(root){try{const value=JSON.parse(fs.readFileSync(path.join(root,'downloads-preferences.json'),'utf8'));return value&&typeof value==='object'&&!Array.isArray(value)?value:{};}catch{return {};}}
 function write(root,value){try{fs.mkdirSync(root,{recursive:true});const file=path.join(root,'downloads-preferences.json');fs.writeFileSync(file+'.tmp',JSON.stringify(value,null,2),{mode:0o600});fs.renameSync(file+'.tmp',file);return true;}catch{return false;}}
 function defaultFolder(root,home){

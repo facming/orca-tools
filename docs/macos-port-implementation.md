@@ -46,6 +46,19 @@ Mac 偏好文件位于 `runtime.configDir`：目录 0700，文件 0600，只保�
 
 **验收：** 并行下载、暂停/继续、断点恢复、重试、SHA-256 全通过；远程权限不弱于 Windows；取消目录选择不改变原设置。
 
+**阶段 3 实现边界（2026-11-05）：** Controller 在配置完整且平台 CLI、SDK、OpenSSH 可用时初始化 DownloadManager。初始化和被动页面读取不会连接 VPS 或生成密钥；初始状态为 configured（远程尚未检查），未配置 environment 为 needs-setup，依赖或请求失败为 error/offline。ready 仅代表最近一次远程请求成功，不代表持续连接。Accounts 保持阶段 2，GPU 保持 unsupported。
+
+Transport 使用 `runtime.cli/ssh/keygen/childEnv/downloadsDir`。每任务 Ed25519 密钥和 known_hosts 独立，Mac 私有目录 0700、私钥/known_hosts/任务 JSON/partial 文件 0600；不安全权限、符号链接及异常元数据失败关闭。SSH 隔离用户配置、agent 和全局 known_hosts，使用 StrictHostKeyChecking=yes、HostKeyAlias 和来自 Orca 受信通道的 host key；同任务 host key 改变时拒绝覆盖 pin。cleanup 只有得到 SSH `KEY_REMOVED` 或既有 Orca 清理回执才删除本地密钥，失败保留 Clear access 提示，阻止更换远程目标。
+
+目录浏览复用 RuntimeClient 的 `files.browseServerDir`；项目根来自既有 `orca repo list --environment … --json`。Projects 返回项目入口，拒绝 `/`、项目外路径、点段、控制字符、反斜杠和相似前缀。进入子目录前逐层确认目录且 `isSymlink === false`；不跟随符号链接，回包必须确认远程身份、POSIX 路径与当前项目路径。隐藏文件、过滤和每页 200 项保留。下载准备在既有固定脚本内解析源文件真实路径并检查项目包含关系，之后调用未改协议的 Python reader；没有新增通用 shell 入口。SDK 若不能确认目录类型/符号链接信息，浏览失败关闭，留待真实兼容性验收。
+
+引擎保留任务模型、1–16 并发、全局 16 连接预算及重试逻辑。补充原子 0600 元数据写入、落盘分块 SHA-256 的恢复校验、完整写入处理、Mac 单管理进程锁、死进程锁恢复和 APFS 硬链接发布检查点。启动后任务保持 paused，只有 Resume 才继续远程操作。发布中断仅在目标 inode 和 SHA-256 都匹配时认定是本任务产物；现有文件不会被覆盖。非硬链接文件系统的复制回退若在发布期间中断，可能需要人工检查，仍不覆盖目标。
+
+默认目的地为 `~/Downloads/Orca`，目录按需创建；已有原生目录选择器与偏好逻辑保留，取消不改设置，支持中文、空格及较长 Mac 路径。权限拒绝给出 Files and Folders / 改选目录建议，磁盘不足给出释放空间提示，不请求提权。完成卡片的 Open folder 经 `runtime.openPath` 打开 Finder。
+
+**离线验收与待办：** 本阶段全部传输、RuntimeClient、SSH/keygen 使用临时目录、mock 与合成字节；Python reader 的注册/读取/清理只在隔离 HOME 执行，host public key 为合成值。实际 APFS 的并行写入、权限、硬链接和 SIGKILL 恢复已离线验证；TCC 拒绝仅为 EPERM/EACCES 模拟，Finder 启动为参数/路由夹具。真实 VPS 传输、真实 host-key 变更、SDK 远程回包和真实 TCC 授权仍未验收。宿主空闲 worker 回收限制继续存在，关闭/重开后须恢复任务，不增加保活绕过机制。具体测试结果和人工步骤见兼容性审计第 11 节。
+
+
 ## 4. GPU：分阶段实现
 
 ### Phase A：ComfyUI Bridge（优先交付）

@@ -7,30 +7,43 @@ const zlib = require('node:zlib');
 const {promisify} = require('node:util');
 const execFile = promisify(cp.execFile);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const {privateDirectory,privatePath}=require('./local-state.cjs');
+const {validRemote,rootsFrom,contains}=require('./projects.cjs');
+const {validate}=require('./settings.cjs');
 
 class SshTransport {
-  constructor({dataDir, runtime, environment, sshHost, sshUser = 'workspace', sshPort = 22}) {
+  constructor({dataDir, runtime, environment, sshHost, sshUser = 'workspace', sshPort = 22, execute=execFile, spawn=cp.spawn, wait=delay, onConnection=()=>{}}) {
     if (!runtime) throw new ToolkitError('Downloads require the Toolkit runtime.');
-    if (runtime.platform === 'darwin') throw new ToolkitError('Downloads are in preview on macOS.');
+    validate({environment,sshHost,sshUser,sshPort});
+    Object.assign(this,{execute,spawn,wait,onConnection});
     Object.assign(this, {dataDir, runtime, cli: runtime.cli, environment, sshHost, sshUser, sshPort});
   }
   async orca(args) {
     let stdout;
-    try { ({stdout} = await execFile(this.cli, [...args, '--environment', this.environment, '--json'],
+    try { ({stdout} = await this.execute(this.cli, [...args, '--environment', this.environment, '--json'],
       {env:this.runtime.childEnv,windowsHide: true, timeout: 65000, maxBuffer: 2 * 1024 * 1024})); }
-    catch { throw new ToolkitError('Unable to reach Orca. Check that Orca and the remote connection are open.'); }
-    const response = JSON.parse(stdout);
+    catch { this.onConnection('offline');throw new ToolkitError('Unable to reach Orca. Check that Orca and the remote connection are open.'); }
+    let response;try{response=JSON.parse(stdout);}catch{throw new ToolkitError('Invalid Orca response.');}
     if (!response.ok) throw new ToolkitError('Orca request failed.');
     return response.result;
   }
-  directory(job) { return path.join(this.dataDir, 'keys', job.id); }
+  directory(job) { if(!/^[a-f0-9]{32}$/.test(job.id))throw new ToolkitError('Invalid transfer ID');return path.join(this.dataDir, 'keys', job.id); }
   async prepare(job) {
+    if(!validRemote(job.source))throw new ToolkitError('Enter an absolute remote project file path.');
+    const client=require('../../remote-runtime.cjs').createRemoteClient(this.runtime,this.environment);
+    if(!client.isRemote)throw new ToolkitError('The selected Orca connection is not remote.');
+    const roots=rootsFrom((await this.orca(['repo','list'])).repos);
+    const root=roots.sort((a,b)=>b.length-a.length).find(root=>contains(root,job.source));
+    if(!root)throw new ToolkitError('Select a file inside an authorized remote project.');
     const directory = this.directory(job);
-    fs.mkdirSync(directory, {recursive: true, mode: 0o700});
+    if(this.runtime.platform==='darwin'){privateDirectory(this.dataDir);privateDirectory(path.join(this.dataDir,'keys'));privateDirectory(directory);}
+    else fs.mkdirSync(directory, {recursive: true, mode: 0o700});
     const key = path.join(directory, 'key');
-    if (!fs.existsSync(key)) await execFile(this.runtime.keygen, ['-q', '-t', 'ed25519', '-N', '', '-f', key,
+    if (!fs.existsSync(key)) await this.execute(this.runtime.keygen, ['-q', '-t', 'ed25519', '-N', '', '-f', key,
       '-C', 'orca-download:' + job.id], {env:this.runtime.childEnv,windowsHide: true, timeout: 15000});
+    if(this.runtime.platform==='darwin'){privatePath(key);const pub=fs.lstatSync(key+'.pub');if(!pub.isFile()||pub.uid!==process.getuid()||pub.nlink!==1)throw new ToolkitError('Invalid task public key.');}
     const publicKey = fs.readFileSync(key + '.pub', 'utf8').trim();
+    if(!/^ssh-ed25519 [A-Za-z0-9+/=]+(?: [a-zA-Z0-9:_-]+)?$/.test(publicKey))throw new ToolkitError('Invalid task public key.');
     const reader = fs.readFileSync(path.join(__dirname, 'remote-reader.py'));
     const request = {id: job.id, source: job.source, publicKey};
     const script = [
@@ -41,23 +54,21 @@ class SshTransport {
       'temp.chmod(0o700);target=root/"parallel-download-reader.py";temp.replace(target)',
       'spec=importlib.util.spec_from_file_location("download_reader",target);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)',
       `request=json.loads(base64.b64decode(${JSON.stringify(Buffer.from(JSON.stringify(request)).toString('base64'))}))`,
+      `allowed=pathlib.Path(${JSON.stringify(root)}).resolve(strict=True);source=pathlib.Path(request['source']).resolve(strict=True)`,
+      "if source!=allowed and allowed not in source.parents: raise ValueError('Source outside project')",
+      "request['source']=str(source)",
       'print("ORCA_DOWNLOAD_META="+json.dumps(m.register(request)),flush=True)'
     ].join('\n');
     const payload = zlib.deflateSync(Buffer.from(script)).toString('base64');
     const command = `python3 -c 'import base64,zlib;exec(zlib.decompress(base64.b64decode("${payload}")))'`;
     let handle;
     try {
-      const {repos=[]} = await this.orca(['repo','list']);
-      const roots = repos.filter(repo=>typeof repo.path==='string'&&repo.path.startsWith('/'));
-      roots.sort((a,b)=>b.path.length-a.path.length);
-      const root = roots.find(repo=>job.source===repo.path||job.source.startsWith(repo.path+'/')) || roots[0];
-      if(!root)throw new ToolkitError('Open a project on the remote server in Orca before downloading.');
-      const result = await this.orca(['terminal', 'create', '--worktree', 'path:'+root.path,
+      const result = await this.orca(['terminal', 'create', '--worktree', 'path:'+root,
         '--title', 'Prepare download', '--command', command]);
       handle = result.terminal?.handle;
       if (!handle) throw new ToolkitError('Orca did not create a preparation terminal');
       for (let attempt = 0; attempt < 60; attempt++) {
-        await delay(1000);
+        await this.wait(1000);
         const result = await this.orca(['terminal', 'read', '--terminal', handle, '--limit', '30']);
         const line = result.terminal?.tail?.find(line => line.startsWith('ORCA_DOWNLOAD_META='));
         if (!line) {
@@ -68,7 +79,10 @@ class SshTransport {
         const meta = JSON.parse(line.slice('ORCA_DOWNLOAD_META='.length));
         if (!Number.isSafeInteger(meta.size) || meta.size < 0 || !/^[a-f0-9]{64}$/.test(meta.sha256)
           || !/^ssh-ed25519 [A-Za-z0-9+/=]+$/.test(meta.hostKey)) throw new ToolkitError('Invalid download metadata');
-        fs.writeFileSync(path.join(directory, 'known_hosts'), `${job.id} ${meta.hostKey}\n`);
+        const known=path.join(directory,'known_hosts'),pin=`${job.id} ${meta.hostKey}\n`;
+        if(fs.existsSync(known)){if(this.runtime.platform==='darwin')privatePath(known);if(fs.readFileSync(known,'utf8')!==pin)throw new ToolkitError('SSH host key changed. Clear access and create a new task after verifying the server.');}
+        else fs.writeFileSync(known,pin,{flag:'wx',mode:0o600});
+        this.onConnection('ready');
         return meta;
       }
       throw new ToolkitError('Preparation timed out. Retry when Orca is connected.');
@@ -78,16 +92,21 @@ class SshTransport {
   }
   arguments(job) {
     const directory = this.directory(job);
-    return ['-T', '-p', String(this.sshPort), '-i', path.join(directory, 'key'),
+    if(this.runtime.platform==='darwin'){privatePath(directory,true);privatePath(path.join(directory,'key'));privatePath(path.join(directory,'known_hosts'));}
+    const nullFile=this.runtime.platform==='win32'?'NUL':'/dev/null';
+    const known='"'+path.join(directory,'known_hosts').replaceAll('\\','\\\\').replaceAll('"','\\"')+'"';
+    return ['-F',nullFile,'-T', '-p', String(this.sshPort), '-i', path.join(directory, 'key'),
       '-o', 'HostKeyAlias=' + job.id, '-o', 'ConnectTimeout=12', '-o', 'IdentitiesOnly=yes',
       '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
-      '-o', 'UserKnownHostsFile=' + path.join(directory, 'known_hosts'),
+      '-o', 'UserKnownHostsFile=' + known, '-o', 'GlobalKnownHostsFile='+nullFile,
+      '-o','IdentityAgent=none','-o','ClearAllForwardings=yes','-o','UpdateHostKeys=no',
       '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', this.sshUser + '@' + this.sshHost];
   }
   read(job, offset, length, signal, onData) {
     return new Promise((resolve, reject) => {
+      if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(length)||length<1||length>8*1024*1024)return reject(new ToolkitError('Invalid byte range'));
       if (signal.aborted) return reject(new ToolkitError('Paused'));
-      const child = cp.spawn(this.runtime.ssh, [...this.arguments(job), 'read', String(offset), String(length)],
+      const child = this.spawn(this.runtime.ssh, [...this.arguments(job), 'read', String(offset), String(length)],
         {env:this.runtime.childEnv,windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']});
       let received = 0, settled = false;
       const abort = () => child.kill();
@@ -96,9 +115,11 @@ class SshTransport {
         if (settled) return;
         settled = true;
         signal.removeEventListener('abort', abort);
+        if(!signal.aborted)this.onConnection(error?'offline':'ready');
         error ? reject(error) : resolve();
       };
       child.stdout.on('data', data => {
+        if(settled)return;
         try {
           if (received + data.length > length) throw new ToolkitError('Invalid range response');
           onData(data, received); received += data.length;
@@ -111,11 +132,11 @@ class SshTransport {
     });
   }
   async cleanup(job) {
-    try{await execFile(this.runtime.ssh, [...this.arguments(job), 'done'], {env:this.runtime.childEnv,windowsHide: true, timeout: 20000});}
+    try{const result=await this.execute(this.runtime.ssh, [...this.arguments(job), 'done'], {env:this.runtime.childEnv,windowsHide: true, timeout: 20000});if(result.stdout.trim()!=='KEY_REMOVED')throw Error();}
     catch{await this.cleanupViaOrca(job);}
     const directory = this.directory(job);
     for (const name of ['key', 'key.pub', 'known_hosts']) fs.rmSync(path.join(directory, name), {force: true});
-    fs.rmdirSync(directory);
+    if(fs.existsSync(directory))fs.rmdirSync(directory);
   }
   async cleanupViaOrca(job) {
     if(!/^[a-f0-9]{32}$/.test(job.id))throw new ToolkitError('Invalid transfer ID');
@@ -134,14 +155,14 @@ class SshTransport {
     const payload=zlib.deflateSync(Buffer.from(script)).toString('base64');
     const command=`python3 -c 'import base64,zlib;exec(zlib.decompress(base64.b64decode("${payload}")))'`;
     const {repos=[]}=await this.orca(['repo','list']);
-    const root=repos.find(repo=>typeof repo.path==='string'&&repo.path.startsWith('/'));
+    const root=rootsFrom(repos)[0];
     if(!root)throw new ToolkitError('Open a remote project in Orca to clear transfer access.');
     let handle;
     try{
-      const result=await this.orca(['terminal','create','--worktree','path:'+root.path,'--title','Clear transfer access','--command',command]);
+      const result=await this.orca(['terminal','create','--worktree','path:'+root,'--title','Clear transfer access','--command',command]);
       handle=result.terminal?.handle;if(!handle)throw new ToolkitError('Could not start access cleanup');
       for(let i=0;i<20;i++){
-        await delay(1000);
+        await this.wait(1000);
         const output=await this.orca(['terminal','read','--terminal',handle,'--limit','10']);
         if(output.terminal?.tail?.includes('ORCA_DOWNLOAD_CLEANED='+job.id))return;
       }

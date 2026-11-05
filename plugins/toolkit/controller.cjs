@@ -17,13 +17,15 @@ class Controller {
  async initialize(){await this.configureDownloads();}
  async configureDownloads(){
   if(this.downloads){await this.downloads.close();this.downloads=null;}
-  this.downloadError='';if(!this.settings.downloads.enabled||this.runtime.platform==='darwin')return;
+  this.downloadError='';this.downloadAvailability='needs-setup';if(!this.settings.downloads.enabled||!this.settings.downloads.environment)return;
   try{
+   require('./modules/downloads/runtime.cjs').checkDownloadsRuntime(this.runtime);
    const config=validateDownload(this.settings.downloads);
    const create=this.options.createDownloads||(opts=>new DownloadManager(opts));
    this.downloads=create({dataDir:this.runtime.downloadsDir,runtime:this.runtime,...config,
-    defaultFolder:path.join(this.runtime.home,'Downloads','Orca'),onComplete:this.options.onComplete});
-  }catch(e){this.downloadError=e instanceof ToolkitError?e.message:'Cannot initialize Downloads. Check settings and directory access.';}
+    onConnection:state=>{this.downloadAvailability=state;if(state==='ready')this.downloadError='';},defaultFolder:path.join(this.runtime.home,'Downloads','Orca'),onComplete:this.options.onComplete});
+   this.downloadAvailability=this.runtime.platform==='darwin'?'configured':'ready';
+  }catch(e){this.downloadAvailability='error';this.downloadError=e instanceof ToolkitError?e.message:'Cannot initialize Downloads. Check settings and directory access.';}
  }
  async update(value){
   if(this.loading)throw new ToolkitError('Settings update is in progress.');
@@ -33,7 +35,7 @@ class Controller {
    // Never silently move a live/resumable task to another server.
    const old=this.settings.downloads;
    const changedTarget=['environment','sshHost','sshUser','sshPort'].some(k=>old[k]!==next.downloads[k]);
-   if(changedTarget&&this.runtime.platform!=='darwin'){
+   if(changedTarget){
     const folder=path.join(this.runtime.downloadsDir,'jobs');
     const jobs=this.downloads?.list()||[];
     if(fs.existsSync(folder))for(const name of fs.readdirSync(folder)){
@@ -54,11 +56,11 @@ class Controller {
   const preview=this.runtime.platform==='darwin';
   return {settings:this.settings,error:this.settingsError,modules:{
    accounts:{enabled:this.settings.accounts.enabled,status:!this.settings.accounts.enabled?'disabled':preview?this.accountAvailability:this.settings.accounts.environment?'configured':'needs-setup',manualRefresh:preview,error:this.accountError,accountCount:this.accountSnapshot?.accounts.length??null},
-   downloads:{enabled:this.settings.downloads.enabled,status:!this.settings.downloads.enabled?'disabled':preview?'preview':this.downloads?'ready':'needs-setup',error:this.downloadError,jobs:this.downloads?.list().length||0},
+   downloads:{enabled:this.settings.downloads.enabled,status:!this.settings.downloads.enabled?'disabled':this.downloadAvailability||'needs-setup',available:!!this.downloads,error:this.downloadError,jobs:this.downloads?.list().length||0},
    gpu:{enabled:this.settings.gpu.enabled,status:!this.settings.gpu.enabled?'disabled':preview?'unsupported':gpu.online?'ready':'offline'}
   }};
  }
- requireDownloads(){if(this.runtime.platform==='darwin')throw new ToolkitError('Downloads are in preview on macOS.');if(!this.downloads||!this.settings.downloads.enabled)throw Error(this.downloadError||'Downloads module is disabled.');return this.downloads;}
+ requireDownloads(){if(!this.downloads||!this.settings.downloads.enabled)throw new ToolkitError(this.downloadError||'Configure and enable Downloads first.');return this.downloads;}
  requireAccounts(){if(!this.settings.accounts.enabled)throw new ToolkitError('Accounts module is disabled.');return this.settings.accounts;}
  async openAccounts(){this.requireAccounts();return {opened:true,url:'/accounts/'};}
  requireRemoteAccounts(){return this.requireAccounts();}

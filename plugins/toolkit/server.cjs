@@ -29,8 +29,8 @@ async function startServer(options){
     return send(200,await gpuAdmin.request(req.url.replace('/api/gpu/','/api/')));
    }
    if(req.method==='GET'&&req.url==='/api/downloads/jobs'){
-    const preview=options.runtime.platform==='darwin'&&controller.settings.downloads.enabled;
-    return send(200,{preview,jobs:preview?[]:controller.requireDownloads().list(),defaultFolder:preferences.defaultFolder(dataDir,options.runtime.home),remoteLocation:preferences.remoteLocation(dataDir,controller.settings.downloads.environment)});
+    const availability=(await controller.status()).modules.downloads;
+    return send(200,{availability,jobs:controller.downloads?.list()||[],defaultFolder:preferences.defaultFolder(dataDir,options.runtime.home),remoteLocation:preferences.remoteLocation(dataDir,controller.settings.downloads.environment)});
    }
    if(req.method!=='POST')return send(404,{error:'Not found.'});
    if(req.headers.origin!==origin)return send(403,{error:'Invalid Origin.'});
@@ -51,8 +51,10 @@ async function startServer(options){
     controller.requireDownloads();
     if(Object.keys(body).some(k=>!['directory','showHidden','query','offset'].includes(k)))throw new ToolkitError('Unexpected remote browser option.');
     const environment=controller.settings.downloads.environment;
-    const result=await remoteBrowser.list(environment,{...body,directory:body.directory??preferences.remoteLocation(dataDir,environment).directory});
+    let result;try{result=await remoteBrowser.list(environment,{...body,directory:body.directory??preferences.remoteLocation(dataDir,environment).directory});}
+    catch(error){controller.downloadAvailability='error';controller.downloadError=publicMessage(error);throw error;}
     if(controller.settings.downloads.environment!==environment)throw new ToolkitError('Remote connection changed. Reopen the file browser.');
+    controller.downloadAvailability=result.directory?'ready':'configured';controller.downloadError='';
     preferences.rememberRemote(dataDir,environment,{directory:result.directory});
     return send(200,result);
    }
