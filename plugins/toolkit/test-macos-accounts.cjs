@@ -144,3 +144,5 @@ test('macOS Accounts page runs refresh, masking, usage, disable/enable, switch a
  f.failure=null;await nodes.refresh.onclick();assert.equal(cards().length,3);
  const next=structuredClone(f.server.controller.settings);next.accounts.environment='Another mock';await f.server.controller.update(next);const n=f.calls.length;listeners['toolkit-settings-changed']();await idle();assert.equal(f.calls.length,n);assert.match(nodes.accounts.text,/macOS preview/);
 });
+
+require('./fixtures/config-service.cjs').hooks(test);

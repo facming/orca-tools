@@ -23,6 +23,7 @@ async function startServer(options){
    }
    if(req.headers['x-toolkit-token']!==token&&req.headers['x-download-token']!==token)return send(403,{error:'Session changed. Reload this page.'});
    if(req.method==='GET'&&req.url==='/api/accounts')return send(200,await controller.readAccounts());
+   if(req.method==='GET'&&req.url==='/api/config-service')return send(200,require('./config-service/client.cjs').request({op:'status'}));
    if(req.method==='GET'&&req.url==='/api/status')return send(200,await controller.status());
    if(req.method==='GET'&&['/api/gpu/native','/api/gpu/workflows','/api/gpu/health'].includes(req.url)){
     controller.requireGpu();

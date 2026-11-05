@@ -22,7 +22,7 @@ function fixture(){
  f.runtime={platform:'darwin',home:root,configDir:path.join(root,'config'),userDataPath:path.join(root,'empty-profile'),cli:path.join(root,'mock-cli'),loadSdk(){f.loads++;return {RuntimeClient};}};
  f.start=async()=>{
   fs.mkdirSync(f.runtime.configDir,{recursive:true,mode:0o700});
-  const config=settings.defaults();config.accounts.environment='Mock remote';settings.save(f.runtime.configDir,config);
+  const config=settings.defaults();config.accounts.environment='Mock remote';settings.save(f.runtime.configDir,config,settings.load(f.runtime.configDir,null,'darwin'),'darwin');
   f.server=await startServer({runtime:f.runtime,port:0,gpu:{async status(){return {online:false};}}});
   const html=await(await fetch(f.server.url)).text();
   f.headers={'X-Toolkit-Token':html.match(/const token='([a-f0-9]+)'/)[1],Origin:new URL(f.server.url).origin,'Content-Type':'application/json'};

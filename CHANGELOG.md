@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-05 — macOS 安全存储与下载授权阶段 7B-3（Draft / 待审查）
+
+- H-02：独立 UID SQLite 单写服务、原生签名 IPC、字段版本冲突与请求幂等、未知 JSON 精度保留、显式迁移预览确认、一致备份/新 epoch 恢复、下载 target lease。macOS 不再写 settings/preferences JSON，缺服务不回退；Windows 保留。
+- H-03：专用 SSH 下载入口与隔离授权代理，SSH key 持有证明、受限只读 staging、持久读 lease、撤销 tombstone、Ed25519 回执及完整任务绑定验证。旧 macOS 任务标记人工清理，不改个人 authorized_keys。
+- 提供生产安装准备、macOS LaunchDaemon 安装/停用工具、恢复命令和部署文档；未执行生产安装或用户数据迁移。
+- 本机真实不同 UID/签名 IPC、Docker 真实多 UID/临时 sshd、并发/读排空/重启恢复通过。Node 92 项 91 通过/1 既有跳过，Bridge 301 项 298 通过/3 既有跳过，Downloads/配置/代理专项通过。
+- H-02/H-03 仍待完整故障矩阵、独立安全审查和人工批准，保持 HIGH OPEN / RELEASE BLOCKED；保留旧竞态程序 exit 1 证据，不宣称旧协议或生产部署已安全。
+
 ## 2026-11-05 — macOS 发布安全加固阶段 7B-1（Draft / BLOCKED）
 
 - H-01：MCP 默认拒绝所有 HTTP redirect，HTTP 错误不回显请求头/远端响应内容；原默认 opener 泄漏已复现，双回环服务 160 个攻击组合及 Bridge 回归通过。

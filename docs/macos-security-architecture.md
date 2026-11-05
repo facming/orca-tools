@@ -1,6 +1,6 @@
 # macOS 安全架构重设计：H-02 / H-03
 
-状态：**7B-2 第一步，仅设计；待 ChatGPT 审查及人工批准，不是修复完成证明。**
+状态：**7B-3 已有可运行实现与隔离测试，Draft / 待独立审查及人工批准。下文设计与第一步记录保留；最新验收见第 7 节。**
 
 基线：`facming/orca-tools` PR #11，`feature/macos-release-hardening`，HEAD `67cac0913f0223e3e84569e982d369f39d4fc6ce`。设计分支：`feature/macos-security-architecture`；Draft PR base 为 `feature/macos-release-hardening`。PR #11 保持原样，**H-02、H-03 两个 HIGH 均未关闭，仍禁止合并及发布**。本文不改变既有审计结论。
 
@@ -290,3 +290,61 @@ Windows 的现有设置存储和默认下载协议路径保持；v3 作为显式
 文档另作 whitespace、相对基线仅一个新增 Markdown 文件、链接和需求覆盖检查；提交前执行 `git diff --cached --check`。新架构的跨 UID、崩溃恢复、磁盘故障、独立 sshd 集成测试尚未实施，不能列作通过。本次仅做架构语义评估和既有回归，不宣称新的 SQLite/IPC/v3 协议已有运行验证。
 
 交付后保持 Draft，不合并、不关闭 PR #11、不修改 main、不执行部署或迁移。按“ChatGPT Brain → Codex 执行 → ChatGPT 审查 → 人工批准”进入下一步；日常文档、测试与 Git 小问题自行处理，审查边界不阻止第一步完整发布。
+
+
+## 7. 2026-11-05：7B-3 实现与实际验收
+
+实现基线是 PR #12 `919480467d692da4fca21eff5acdbf721688ad4f`；实现分支
+`feature/macos-security-implementation`，base 保持 `feature/macos-security-architecture`。
+未改 main，未部署生产服务/VPS，未读取或迁移真实用户配置，未删除个人 SSH 授权。
+
+### 7.1 已实现的路径
+
+- `plugins/toolkit/config-service/`：独立非 root UID 服务、原生 C bridge、内核 peer
+  UID/audit token 与 Security.framework designated requirement；SQLite 单写连接及
+  lifetime lock，DELETE/EXTRA/fullfsync；完整 JSON 树、字符串 revision、字段/父子/ABA
+  冲突、同事务幂等请求与审计、跨文档 patch-many、未知精确数值保留、双来源预览确认、
+  原始 bytes 存档、一致备份、新 epoch 恢复、持久 target lease。
+- macOS settings/preferences 运行读写只走服务，不再用 private-json；缺服务明确报错，
+  迁移待确认时拒绝保存。Windows 继续 JSON。其他专用偏好未纳入本次迁移。
+- `services/download-authorization/`：独立 authority/lookup/reader/workspace 角色、
+  管理 IPC、任务 SSHSIG 持有证明、逐级 no-follow 导入、0400 staging、受限范围读取、
+  数据库唯一任务/公钥绑定、永久 tombstone、nonce 防重放、签名注册元数据和撤销回执。
+- 独立 sshd 配置使用 AuthorizedKeysFile none、AuthorizedKeysCommand、固定 per-key
+  forced command。新增 macOS v3 任务从管理员固定的 host key/receipt key/epoch 取信任，
+  不从同次 stdout 建立信任。所有撤销走同一验签器，回执落盘及 lease 释放成功后删任务 key。
+- 旧 macOS 任务显示 legacy/manual cleanup，旧 register/字符串 cleanup/fallback 被拒绝；
+  不迁移旧任务，不改个人 authorized_keys。Windows 旧协议保留，其风险没有因此消失。
+- 提供显式 bundle 构建、macOS 安装/卸载停用、Linux 安装准备、sshd 模板、恢复命令和
+  [部署手册](macos-security-deployment.md)。生产 Developer ID、部署权限和信任固定必须由管理员审核。
+
+### 7.2 实际证据（不能扩大解释）
+
+| 项目 | 实际结果 |
+| --- | --- |
+| macOS 原生跨 UID | 用户在本机终端以 sudo 执行 `scripts/test-macos-security-isolation.py --client-uid 501`；真实 `_www` 服务 UID 与 501 客户端 UID。签名桥接接受，未批准 Python 客户端拒绝；DB/journal/WAL/SHM 写、unlink/rename/hardlink/symlink 拒绝；显式合成迁移读取通过。用户返回完整 PASS 截图，临时目录/进程自动清理。 |
+| native 首次失败与修正 | 首次测试因 CDHash requirement 表达式格式错误拒绝合法 bridge，未计通过。改为 `cdhash H"…"` 并在启动前 codesign 校验；同时改用内核 audit token。之后用户两次运行全部 PASS。生产签名证书未使用。 |
+| Linux 真隔离 | 无网络 Docker 临时环境中真实六个 UID；workspace/reader/lookup/stranger 对代理 DB、journal、签名 key、受管代码操作均被 DAC 拒绝；配置服务 UID 与客户端不同，多独立进程修改无关字段均保留。 |
+| 独立真实 sshd | 实际公钥认证/10-byte 读取通过；shell、PTY、SFTP 命令及越界读取拒绝；错误 host pin 拒绝；合成个人 authorized_keys 独立编辑不影响下载。 |
+| 读 lease | 真实 reader 进程持有 lease 时 revoke 返回 REVOKING/PENDING、无签名且禁止新 SSH；reader ACK 后新 challenge 才产生 DRAINED。异常读进程的 PID/start-time/boot-id 栅栏只在确认退出后释放；不能确认的 lease 保留。 |
+| 并发/重启/恢复 | 双任务 register/revoke、永久任务/key 唯一性、服务 SIGKILL 后 tombstone、被撤销 key 拒绝；配置 hot-journal SIGKILL 恢复、request/document 一致；损坏数据库从备份恢复到新目录、新 epoch，原损坏 bytes 保留。 |
+| 新单元/协议测试 | config 7 项、authority 5 项、Node v3 6 项；含 request_id 重试/冲突、同字段/父子/ABA、未知大整数/高精度小数、重复 key/坏 JSON、迁移预览重启、target lease、SQLite allocation FULL 回滚、只读写入拒绝、伪造/nonce/epoch/字段绑定/seq 回退、失败保留 key，以及真实 SSHSIG 注册→签名元数据→撤销闭环。 |
+| Toolkit/Bridge | 最终 Node 与 Python 回归数量见发布审计同日附录；Accounts、ComfyUI、Godot、Blender、Unity 原业务代码未修改。旧测试对 JSON 落盘的断言改为 SQLite API fixture/旧 JSON 不再有效断言；Windows legacy 合约继续测试。 |
+| 旧竞态复现 | `reproduce-unresolved-races.py` **仍 exit 1**，两个 reproduced=True。该脚本直接调用保留的旧 helper/reader，是旧协议风险证据，未改成 skip/pass。不能据此把 Windows 或历史授权宣称安全。 |
+
+### 7.3 实现细化与未验收项
+
+原设计的重启栅栏落地为“durable lease + stdout flush ACK + Linux 内核 peer PID、
+start-time、boot-id 的退出证明”。仅在确认旧 reader 不再产生数据时清除该 lease；
+普通 daemon 重启不会整体清空计数。未知状态保持 REVOKING。注册 staging 在同一
+注册事务内准备，ACTIVE 提交前没有可用授权；失败对象保留，不猜测清除。历史和请求
+目前不回收，长期运行需监测容量；DB 错误不产生成功确认。
+
+本轮没有验证真实整机掉电、VFS 短写/EIO/fsync 注入、实际 VPS 全机重启、真实
+Developer ID/notarization/LaunchDaemon 开机流程、生产 SSH 全入口策略或真实引擎 GUI。
+SQLite max_page_count 引发的 FULL 和 query_only 失败不能冒充这些测试。服务版 Python
+源码由 root 保护，最终签名发行包/解释器及依赖仍需原生安全审查。IPC 认证已安装桥接
+与 tenant，不证明同 UID 调用者的人类意图。旧 JSON 降级和旧授权恢复仍不允许自动执行。
+
+**H-02/H-03：功能实现与上述临时环境测试已交付，但完整验收矩阵、独立审查和人工批准
+尚未完成，继续 HIGH OPEN / RELEASE BLOCKED；不得把此 Draft 当作生产放行证明。**

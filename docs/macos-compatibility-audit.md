@@ -596,3 +596,26 @@ H-03 原 cleanup 丢失读取后新增 key 已用 #8 原代码复现；register/
 **H-02/H-03 仍未关闭。** `reproduce-unresolved-races.py` 退出 1，证明最后身份比较与 renameat 之间的非合作写入仍可能被覆盖，H-03 此时仍可能误报清理成功。Node 不具备必要的 descriptor API，CPython 原生绑定缩小了路径攻击面，但 advisory 锁不能强制人工编辑器遵守；改用 C 实现相同调用也不提供原子条件替换。新增 helper 仍需独立安全审查，不能称为已批准的原生安全实现。
 
 全 Toolkit/Downloads Node 98 项：97 通过、1 跳过；Remote Reader 原回归及 13 项安全测试通过；100 轮 APFS 并发注册/清理通过。**这些通过不覆盖上述两个已复现的失败窗口。** 修复细节、逐项测试、原始复现、文件系统 allowlist、断电/磁盘故障、Python 依赖和人工迁移事项见发布审计的 7B-1 记录。真实业务验收依旧未进行，不修改原阶段 0/后续记录为 PASS。
+
+
+## 2026-11-05：阶段 7B-3 可运行安全服务（待审查）
+
+macOS settings/downloads-preferences 现只走独立 UID SQLite 配置服务。未安装服务或
+迁移待确认会明确显示并阻止保存，不降级 JSON；原文件仅保留，不自动导入。新增原生
+签名桥接、LaunchDaemon 安装器、显式迁移/备份/恢复和 target lease。Windows 保留原有
+JSON/legacy 下载依赖。Accounts 的独立偏好和四引擎业务未改变。
+
+macOS Downloads 新任务为 v3：管理员固定的独立 SSH 入口、host pin、receipt key 和
+服务 epoch；授权代理独立 UID，专用读取/查询账户，范围 staging、持久 lease/tombstone，
+Ed25519 验签后才删除任务 key。旧 macOS 任务只显示 legacy/manual cleanup，不自动迁移
+或清理个人 authorized_keys。UI 显示服务缺失/正常/迁移待确认和授权/撤销/待核查状态。
+
+本机用户执行的 native harness：真实 `_www`/501 UID 文件权限与签名 IPC 全部 PASS。
+Docker 无网络临时六 UID 和真实 sshd 的读取、命令限制、host key 变化、并发撤销、读 lease
+排空、服务重启及配置离线恢复 PASS。Node 92 项 91 通过/1 既有跳过；Bridge 301 项 298
+通过/3 既有跳过；Remote Reader、13 项旧 Downloads hardening、7 项配置与5项代理测试通过。
+精确范围和未测项见 [架构验收记录](macos-security-architecture.md)。
+
+H-02/H-03 功能实现不等于批准关闭：旧协议竞态复现仍失败，生产签名/服务部署、实机
+全断电/VFS 故障和独立安全审查未验收，仍 RELEASE BLOCKED。部署需人工安装服务身份、
+审核独立 SSH 配置和全入口限制、固定信任材料，并单独确认真实配置迁移。

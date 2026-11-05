@@ -65,20 +65,23 @@ end run
   assert.equal(fs.realpathSync(result.path), selected);
   assert.equal(result.warning, undefined);
   const preference = path.join(configDir, 'downloads-preferences.json');
-  const saved = fs.readFileSync(preference);
-  assert.equal(fs.statSync(preference).mode & 0o777, 0o600);
+  const readPreference=()=>require('./config-service/client.cjs').request({op:'read',namespace:'downloads-preferences'}).raw_json;
+  const saved = readPreference();
+  assert.equal(fs.existsSync(preference),false);
   assert.equal((await jobs()).defaultFolder, result.path);
   outcome = 'cancel';
   assert.deepEqual(await (await choose()).json(), {cancelled: true});
-  assert.deepEqual(fs.readFileSync(preference), saved);
+  assert.deepEqual(readPreference(), saved);
   outcome = 'fail';
   const failed = await choose();
   assert.equal(failed.status, 400);
   assert.deepEqual(await failed.json(), {error: 'The folder selection window could not finish. Try again or enter a folder path manually.'});
-  assert.deepEqual(fs.readFileSync(preference), saved);
+  assert.deepEqual(readPreference(), saved);
   assert.equal(picker.pending, null);
   await service.close();
   service = await startServer(options);
   await refreshSession();
   assert.equal((await jobs()).defaultFolder, result.path);
 });
+
+require('./fixtures/config-service.cjs').hooks(test);

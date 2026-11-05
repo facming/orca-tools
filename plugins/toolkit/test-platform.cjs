@@ -177,6 +177,7 @@ test('open and folder selection use argument arrays, preserve Unicode, redact er
 });
 
 test('macOS activation shares one runtime, serves local previews and cannot start GPU or remote work', macOnly, async t => {
+  require('./fixtures/config-service.cjs').install(t);
   const f = mac(t), r = f.build();
   const launched = [];
   r.openUrl = async url => launched.push(url);
@@ -225,11 +226,12 @@ test('macOS activation shares one runtime, serves local previews and cannot star
   r.chooseDirectory = async () => ({cancelled: false, path: selected});
   assert.equal((await choose()).status, 200);
   const preference = path.join(r.configDir, 'downloads-preferences.json');
-  const previous = fs.readFileSync(preference);
-  assert.equal(fs.statSync(preference).mode & 0o777, 0o600);
+  const readPreference=()=>require('./config-service/client.cjs').request({op:'read',namespace:'downloads-preferences'}).raw_json;
+  const previous = readPreference();
+  assert.equal(fs.existsSync(preference),false);
   r.chooseDirectory = async () => ({cancelled: true});
   assert.deepEqual(await (await choose()).json(), {cancelled: true});
-  assert.deepEqual(fs.readFileSync(preference), previous);
+  assert.deepEqual(readPreference(), previous);
   const jobs = await (await fetch(url + 'api/downloads/jobs', {headers})).json();
   assert.equal(jobs.defaultFolder, selected);
   assert.deepEqual(jobs.jobs, []);

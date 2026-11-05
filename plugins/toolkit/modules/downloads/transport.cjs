@@ -54,6 +54,7 @@ class SshTransport {
   }
   directory(job) { if(!/^[a-f0-9]{32}$/.test(job.id))throw new ToolkitError('Invalid transfer ID');return path.join(this.dataDir, 'keys', job.id); }
   async prepare(job) {
+    if(this.runtime.platform==='darwin')throw new ToolkitError('macOS requires v3 authorization; legacy/manual cleanup.');
     if(!validRemote(job.source))throw new ToolkitError('Enter an absolute remote project file path.');
     const client=require('../../remote-runtime.cjs').createRemoteClient(this.runtime,this.environment);
     if(!client.isRemote)throw new ToolkitError('The selected Orca connection is not remote.');
@@ -151,6 +152,7 @@ class SshTransport {
     });
   }
   async cleanup(job) {
+    if(this.runtime.platform==='darwin')throw new ToolkitError('Legacy task: manual cleanup required; key retained.');
     try{const result=await this.execute(this.runtime.ssh, [...this.arguments(job), 'done'], {env:this.runtime.childEnv,windowsHide: true, timeout: 20000});if(result.stdout.trim()!=='KEY_REMOVED:'+job.id)throw Error();}
     catch{await this.cleanupViaOrca(job);}
     const directory = this.directory(job);
@@ -158,6 +160,7 @@ class SshTransport {
     if(fs.existsSync(directory))fs.rmdirSync(directory);
   }
   async cleanupViaOrca(job) {
+    if(this.runtime.platform==='darwin')throw new ToolkitError('Legacy task: manual cleanup required; key retained.');
     if(!/^[a-f0-9]{32}$/.test(job.id))throw new ToolkitError('Invalid transfer ID');
     const nonce=crypto.randomBytes(16).toString('hex');
     const receipt='ORCA_DOWNLOAD_CLEANED='+job.id+':'+nonce;
