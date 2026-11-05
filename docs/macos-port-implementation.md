@@ -30,7 +30,13 @@ macOS 建议目录（须按 Orca 沙盒/应用约定确认）：
 
 复用账号列表、邮箱遮罩、用量快照验证、切换状态和错误处理。适配真实 Orca SDK/CLI 路径、user-data path、environment 和 RPC。远程 OAuth 凭据继续留在 VPS/远程 Orca，不下载到 Mac；保留账号归属验证。
 
-**验收：** 至少两个远程账号正确显示；未知/过期/不可用用量如实呈现；切换后新建远程 Claude 会话使用目标账号；不声称切换会迁移已有会话。
+**阶段 2 实现边界（2026-11-05）：** Mac 的 `GET /api/accounts` 只返回当前进程中的脱敏快照或 preview 提示，`GET /api/status` 只读本地状态；初始化、激活、页面打开及总览计数不构造 RuntimeClient，不调用 RPC。明确点击刷新时，通过既有 `POST /api/accounts/refresh` 使用用户配置的 environment；选择或禁用操作继续做远程前置校验。RuntimeClient 使用平台层已核验的 `userDataPath`、`cli` 和 `loadSdk()`，保留 30 秒超时，不额外推断或读取 profile。SDK 可能更新 environment 最近使用状态，页面在首次刷新前提示该行为。
+
+Accounts 只有在请求成功、`isRemote`、`ok`、`_meta.runtimeId`、账号响应及本地偏好均通过校验后显示 ready；这是最近一次成功请求的状态，并非持续连接探测。失败或 environment 更改会清除快照和 ready，下一次访问必须由用户明确触发。超时不自动重试账号切换，也不报告成功。配对修复后，下一次显式请求重新构造失败的 client。旧 SDK 用量双快照验证及 Windows 的现有读取流程保留。
+
+Mac 偏好文件位于 `runtime.configDir`：目录 0700，文件 0600，只保存 environment 和禁用的账号 ID。损坏文件、外部改动、不安全权限、符号链接均拒绝覆盖；写入使用独占临时文件和原子重命名。当前仅 mock 测试及 mock 浏览器交互通过，真实 RPC 验收仍待代码审查和人工授权。Downloads / GPU 不在本阶段开放。
+
+**验收（仍待真实 RPC 授权）：** 至少两个远程账号正确显示；未知/过期/不可用用量如实呈现；切换后新建远程 Claude 会话使用目标账号；不声称切换会迁移已有会话。
 
 ## 3. Downloads
 

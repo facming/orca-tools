@@ -1,6 +1,6 @@
 'use strict';
 const {ToolkitError} = require('../platform/errors.cjs');
-const {createRemoteClient}=require('../remote-runtime.cjs');
+const {createRemoteClient,remoteAccountError}=require('../remote-runtime.cjs');
 function maskedEmail(value){if(typeof value!=='string')return '***';const match=value.match(/^([^@\s]+)@([^@\s]+)$/);return match?match[1][0]+'***@'+match[2]:'***';}
 function timestamp(value){if(typeof value==='number'&&Number.isFinite(value))return value;if(typeof value==='string'&&/^\d{4}-\d\d-\d\dT/.test(value)&&Number.isFinite(Date.parse(value)))return new Date(value).toISOString();return null;}
 function snapshotBinding(result,id){
@@ -14,7 +14,7 @@ function usageDetails(result,id,verifiedActiveId){
  const limits=result.rateLimits||{},active=id===result.claude.activeAccountId;
  const candidate=active?limits.claude:limits.inactiveClaudeAccounts?.find(a=>a.accountId===id)?.rateLimits;
  const updatedAt=timestamp(candidate?.updatedAt),fail=candidate?.usageMetadata?.failureKind;
- const empty=(code,message)=>({usage:null,usageStatus:{code,message,updatedAt}});
+ const empty=(code,message)=>({usage:null,usageStatus:{code,state:['unavailable','not-reported','unverified-account'].includes(code)?'unknown':'error',message,updatedAt}});
  if(!candidate)return empty('unavailable','Usage has not been reported yet. Refresh usage to check.');
  if(fail==='stale-token')return empty('stale-token','Usage credentials expired. Start Claude with this account; sign in again if needed.');
  if(fail==='rate-limited')return empty('rate-limited','Usage is temporarily rate limited. Try again later.');
@@ -31,7 +31,7 @@ function usageDetails(result,id,verifiedActiveId){
  if(!hasUsage)return empty('not-reported',candidate.status==='fetching'?'Usage is refreshing. Check again shortly.':'Orca has not reported usage windows for this account.');
  const ms=typeof updatedAt==='number'?(updatedAt<1e12?updatedAt*1000:updatedAt):Date.parse(updatedAt);
  const stale=!Number.isFinite(ms)||Date.now()-ms>5*60000;
- return {usage:clean,usageStatus:{code:'ready',message:candidate.status==='fetching'?'Refreshing; showing the last reported usage.':stale?'Showing cached usage. Refresh for the latest values.':'',updatedAt,stale,source:snapshot?'runtime-snapshot':'account-bound'}};
+ return {usage:clean,usageStatus:{code:'ready',state:stale?'stale':'ready',message:candidate.status==='fetching'?'Refreshing; showing the last reported usage.':stale?'Showing cached usage. Refresh for the latest values.':'',updatedAt,stale,source:snapshot?'runtime-snapshot':'account-bound'}};
 }
 function publicState(result,verifiedActiveId=null){
  if(!result?.claude||!Array.isArray(result.claude.accounts))throw new ToolkitError('The remote account response is unavailable.');
@@ -43,8 +43,14 @@ class Accounts {
  async call(settings,method,params){
   if(!settings.environment)throw new ToolkitError('Set the remote environment in Toolkit settings.');
   let client=this.clients.get(settings.environment);
-  try{if(!client){client=this.createClient(settings.environment);if(!client.isRemote)throw Error();if(this.clients.size>=16)this.clients.clear();this.clients.set(settings.environment,client);}const r=await client.call(method,params);if(!r.ok||!r._meta?.runtimeId)throw Error();return r.result;}
-  catch{throw new ToolkitError('Unable to reach remote accounts. Check the Orca connection and refresh.');}
+  try{
+   if(!client){client=this.createClient(settings.environment);if(this.clients.size>=16)this.clients.clear();this.clients.set(settings.environment,client);}
+   if(client.isRemote!==true)throw new ToolkitError('Unable to reach remote accounts: the selected environment is not remote.');
+   const r=await client.call(method,params);
+   if(r?.ok!==true)throw remoteAccountError(r?.error);
+   if(typeof r._meta?.runtimeId!=='string'||!r._meta.runtimeId.trim())throw new ToolkitError('Remote accounts RPC is incompatible: runtime identity is missing.');
+   return r.result;
+  }catch(error){this.clients.delete(settings.environment);throw error instanceof ToolkitError?error:remoteAccountError(error);}
  }
  async list(settings,refreshUsage=false){
   const first=await this.call(settings,'accounts.list',{refreshUsage}),id=first?.claude?.activeAccountId,candidate=first?.rateLimits?.claude;
@@ -55,7 +61,7 @@ class Accounts {
   return publicState(first);
  }
  async select(settings,body,isCurrent=()=>true){
-  if(Object.keys(body).some(k=>!['accountId','expectedActiveAccountId'].includes(k))||typeof body.accountId!=='string'||body.accountId.length>200||!(typeof body.expectedActiveAccountId==='string'||body.expectedActiveAccountId===null))throw new ToolkitError('Invalid account selection.');
+  if(Object.keys(body).some(k=>!['accountId','expectedActiveAccountId'].includes(k))||typeof body.accountId!=='string'||!body.accountId.trim()||body.accountId.length>200||!(typeof body.expectedActiveAccountId==='string'||body.expectedActiveAccountId===null))throw new ToolkitError('Invalid account selection.');
   if(this.switching)throw new ToolkitError('An account switch is in progress. Refresh shortly.');
   this.switching=true;
   try{
@@ -63,8 +69,8 @@ class Accounts {
    if(!isCurrent())throw new ToolkitError('Remote connection changed. Refresh before switching.');
    if(!account)throw new ToolkitError('Account not found. Refresh to try again.');
    if(account.needsSignIn)throw new ToolkitError('Sign in again on the remote host to use this account.');
-   if(account.current)return state;
    if(body.expectedActiveAccountId!==state.activeAccountId)throw new ToolkitError('The active account has changed. Refresh before switching.');
+   if(account.current)return state;
    await this.call(settings,'accounts.selectClaude',{accountId:account.id});
    const after=await this.list(settings);
    if(!isCurrent())throw new ToolkitError('Remote connection changed. Refresh to check the selected account.');

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-05 — macOS Accounts 阶段 2 开发记录
+
+- 复用 Accounts 业务及阶段 1 platform runtime，支持用户配置的远程 environment。Mac 激活、页面打开、总览计数和状态检查不构造 RuntimeClient、不调用 Accounts RPC；用户点击刷新或账号操作后才访问远程。
+- 通过回包校验后解除 Accounts preview，失败撤销 ready 并显示脱敏诊断。保留远程身份、用量归属、切换并发及前后状态校验；补充明确的 ready / stale / unknown / error 用量状态和可见刷新按钮。
+- 恢复 Mac 本地禁用偏好：0700 目录、0600 文件，仅存 environment 与账号 ID，拒绝损坏、外部改动、符号链接及不安全权限；Windows 原偏好行为保留。
+- Accounts mock 测试 22/22 通过；全部 Toolkit Node 测试 60 通过、0 失败、1 项 Windows 原生探针跳过。浏览器交互使用合成账号和 mock SDK。真实远程配对、账号读取、用量和切换均未验证；Downloads / GPU 保持 preview / unsupported。
+
 ## 2026-11-05 — macOS 目录选择修复 / Toolkit 1.3.2
 
 - 修复选择目录后 AppleScript 向只读 `selection` 属性赋值导致的 -10006 错误，改用局部变量接收目录 alias。

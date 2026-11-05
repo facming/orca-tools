@@ -209,11 +209,12 @@ test('macOS activation shares one runtime, serves local previews and cannot star
   const headers = {'X-Toolkit-Token': html.match(/const token='([a-f0-9]+)'/)[1], Origin: new URL(url).origin, 'Content-Type': 'application/json'};
   const state = await (await fetch(url + 'api/status', {headers})).json();
   assert.deepEqual(Object.values(state.modules).map(m => m.status), ['preview', 'preview', 'unsupported']);
-  for (const [route, method] of [['accounts', 'GET'], ['downloads/jobs', 'POST'], ['gpu/open', 'POST'], ['gpu/native', 'GET']]) {
+  for (const [route, method] of [['downloads/jobs', 'POST'], ['gpu/open', 'POST'], ['gpu/native', 'GET']]) {
     const response = await fetch(url + 'api/' + route, {method, headers, body: method === 'POST' ? '{}' : undefined});
     assert.equal(response.status, 400);
     assert.match((await response.json()).error, /macOS/);
   }
+  assert.equal((await (await fetch(url + 'api/accounts', {headers})).json()).requiresRefresh, true);
   const post = (route, body) => fetch(url + 'api/' + route, {method: 'POST', headers, body});
   const malformed = await post('settings', 'fixture-sensitive-input');
   assert.deepEqual(await malformed.json(), {error: 'Toolkit could not complete this request.'});
