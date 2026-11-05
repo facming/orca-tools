@@ -18,6 +18,7 @@ p=argparse.ArgumentParser()
 p.add_argument('action',choices=['install','unload'])
 p.add_argument('--tenant',required=True,type=int)
 p.add_argument('--bundle')
+p.add_argument('--caller-app', help='Root-protected signed Orca Toolkit caller app; not a Node/Electron CLI')
 p.add_argument('--service-uid',type=int)
 p.add_argument('--python',default='/usr/bin/python3')
 a=p.parse_args()
@@ -25,9 +26,14 @@ if sys.platform!='darwin' or os.geteuid()!=0:raise SystemExit('Administrator-run
 label='com.orca.toolkit.config.'+str(a.tenant)
 plist=Path('/Library/LaunchDaemons')/(label+'.plist')
 if a.action=='unload':
+    subprocess.run(['launchctl','disable','system/'+label],check=True)
     subprocess.run(['launchctl','bootout','system/'+label],check=True)
     print('Service unloaded. Program, account, database, backups and migration sources retained for manual audit.')
     raise SystemExit(0)
+if not a.caller_app:raise SystemExit('--caller-app is required; Bridge execution is not caller authorization')
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'plugins/toolkit/config-service'))
+from caller_policy import enroll
+caller_requirement=enroll(a.caller_app)
 if not a.bundle or not a.service_uid or a.service_uid in (0,a.tenant):raise SystemExit('Distinct --service-uid and --bundle required')
 pwd.getpwuid(a.tenant)
 # Neither interpreter nor its ancestors may be replaceable by the desktop UID.
@@ -65,7 +71,7 @@ state_top=Path('/Library/Application Support/OrcaToolkitState');state_top.mkdir(
 if state_top.stat().st_uid!=0 or state_top.stat().st_mode & 0o022:raise SystemExit('Unsafe state parent')
 state=state_top/str(a.tenant);state.mkdir(mode=0o700);os.chown(state,a.service_uid,-1)
 run=state_top/'run';run.mkdir(mode=0o755,exist_ok=True);os.chown(run,a.service_uid,-1)
-args=[str(python),'-I',str(dest/'entry.py'),'--state',str(state),'--socket',str(run/(str(a.tenant)+'.sock')),'--tenant',str(a.tenant),'--requirement',requirement]
+args=[str(python),'-I',str(dest/'entry.py'),'--state',str(state),'--socket',str(run/(str(a.tenant)+'.sock')),'--tenant',str(a.tenant),'--requirement',requirement,'--caller-requirement',caller_requirement]
 # -I drops source directory, user site-packages and environment injection.
 (dest/'entry.py').write_text("import runpy,sys\nsys.path.insert(0,"+repr(str(dest))+")\nrunpy.run_path("+repr(str(dest/'service.py'))+",run_name='__main__')\n")
 subprocess.run(args+['--initialize'],user=a.service_uid,group=grp.getgrnam('nobody').gr_gid,extra_groups=[],check=True)
@@ -74,5 +80,6 @@ config={'Label':label,'ProgramArguments':args,'UserName':'_orcatoolkit','RunAtLo
         'StandardErrorPath':str(state/'service-error.log'),'StandardOutPath':str(state/'service.log')}
 with plist.open('xb') as out:plistlib.dump(config,out)
 os.chmod(plist,0o644)
+subprocess.run(['launchctl','enable','system/'+label],check=True)
 subprocess.run(['launchctl','bootstrap','system',str(plist)],check=True)
 print('Installed isolated service. Migration still pending; explicitly preview and confirm both sources.')

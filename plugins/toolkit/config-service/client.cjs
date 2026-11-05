@@ -4,7 +4,7 @@ const {ToolkitError}=require('../platform/errors.cjs');
 const bridge='/Library/PrivilegedHelperTools/OrcaToolkit/config-bridge';
 const snapshots=new WeakMap();
 function request(body){
- const result=cp.spawnSync(bridge,[],{input:JSON.stringify(body),encoding:'utf8',timeout:31000,maxBuffer:2*1024*1024,env:{PATH:'/usr/bin:/bin'}});
+ const result=cp.spawnSync(bridge,[],{input:JSON.stringify(body)+'\n',encoding:'utf8',timeout:31000,maxBuffer:2*1024*1024,env:{PATH:'/usr/bin:/bin'}});
  if(result.error||result.status!==0)throw new ToolkitError('Configuration service not installed or unavailable. Install the isolated service; JSON fallback is disabled.');
  let r;try{r=JSON.parse(result.stdout);}catch{throw new ToolkitError('Invalid configuration service response.');}
  if(!r.ok)throw new ToolkitError(r.error);return r.result;

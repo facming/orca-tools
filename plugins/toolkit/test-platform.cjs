@@ -196,7 +196,9 @@ test('macOS activation shares one runtime, serves local previews and cannot star
   assert.equal(openGpu.mock.callCount(), 0);
   assert.equal(service.controller.accounts.runtime, r);
   assert.equal(service.controller.gpu.runtime, r);
-  assert.equal(commands.size, 5);
+  assert.equal(commands.size, 6);
+  assert.equal(typeof commands.get('toolkit.configuration'), 'function');
+  assert.equal(commands.get('toolkit.configuration')({operation:'status'}).state, 'ready');
   const {url} = service;
   assert.equal(new URL(url).hostname, '127.0.0.1');
   for (const name of ['accounts', 'downloads']) {

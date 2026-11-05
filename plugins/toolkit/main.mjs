@@ -1,6 +1,7 @@
 import {fileURLToPath} from 'node:url';
 import runtimeModule from './platform/index.cjs';
 import hub from './server.cjs';
+import configuration from './config-service/migrate.cjs';
 
 let service;
 export default async function activate(api) {
@@ -18,6 +19,7 @@ export default async function activate(api) {
     if(runtime.platform==='win32')await service.controller.openGpu();
     return open(service.url+'#workflows',args);
   });
+  if(runtime.platform==='darwin')api.commands.register('toolkit.configuration',({operation,args=[]}={})=>configuration.run(operation,args));
   api.commands.register('toolkit.pause-downloads',async()=>{await service.controller.downloads?.pauseAll();return {ok:true};});
   api.log('Orca Toolkit is ready. Ctrl+Alt+T opens the control center.');
   // open() starts both ComfyUI and the authenticated GPU bridge; it does not

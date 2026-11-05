@@ -202,3 +202,14 @@
 - 保留 Bridge/MCP 1.4.0 的 Git 唯一项目同步、渲染前自动更新、覆盖前备份、Godot 参数及 Blender Python。
 - 提供 Windows/Linux 安装脚本、多账号配置步骤、持久防火墙、自启、升级与移除文档。
 - 通用自启助手只激活用户已审核启用的插件，不携带原机器的审核哈希或自动同意未知版本。
+
+
+### macOS security finalization (Draft PR #14)
+
+- Authenticate original configuration request sockets with kernel audit tokens,
+  in addition to the signed Bridge; pin a reviewed sealed caller release and
+  reject generic interpreter/Electron injection configurations.
+- Preserve in-host migration/backup/restore commands, supply missing legacy UI
+  defaults without rewriting unknown numbers, and persist LaunchDaemon disable.
+- Add native impersonation tests, Controller conflict regression, v3 manager
+  pause/restart/resume coverage, and deployment/acceptance evidence.

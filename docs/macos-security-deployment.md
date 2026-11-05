@@ -24,7 +24,7 @@ stdlib must be maintained as part of the installed trusted bundle.
    interpreter with your reviewed values:
 
    ```sh
-   sudo /usr/bin/python3 scripts/install-security-macos.py install --tenant 501 --service-uid 490 --bundle /tmp/orca-security-build --python /usr/bin/python3
+   sudo /usr/bin/python3 scripts/install-security-macos.py install --tenant 501 --service-uid 490 --bundle /tmp/orca-security-build --caller-app /Applications/OrcaToolkit.app --python /usr/bin/python3
    ```
 
    This creates a non-login identity only if absent, installs immutable code,
@@ -32,27 +32,30 @@ stdlib must be maintained as part of the installed trusted bundle.
    LaunchDaemon. It refuses existing installations/databases. There is no
    privileged code in the desktop runtime and no JSON fallback.
 
-3. As the desktop user, stop old Controllers, select the two source files and run:
+3. Stop old Controllers and select both migration sources explicitly. Invoke
+   `toolkit.configuration` **inside the enrolled Orca Toolkit host**, with these
+   command arguments (save the returned preview JSON to a selected local file):
 
-   ```sh
-   node plugins/toolkit/config-service/migrate.cjs preview /SELECTED/settings.json /SELECTED/downloads-preferences.json > /tmp/orca-migration-preview.json
+   ```json
+   {"operation":"preview","args":["/SELECTED/settings.json","/SELECTED/downloads-preferences.json"]}
    ```
 
-   `--defaults` may replace either filename **only when intentionally selecting
-   defaults for a missing source**. Inspect `raw_json`, hashes and unknown fields.
-   Confirm those captured bytes, not a subsequent read of the source paths:
-
-   ```sh
-   node plugins/toolkit/config-service/migrate.cjs confirm /tmp/orca-migration-preview.json
-   node plugins/toolkit/config-service/migrate.cjs status
-   ```
+   `--defaults` may replace either source only when intentionally selecting
+   defaults. Inspect `documents.*.raw_json`, hashes and unknown fields. Confirm
+   those captured bytes with `{"operation":"confirm","args":["/SELECTED/preview.json"]}`,
+   then `{"operation":"status"}`. This command calls the exported
+   `config-service/migrate.cjs` API within the authenticated host. Standalone
+   `node migrate.cjs` is **not authorized in production**; do not whitelist Node
+   to make the old command work. A caller packaging integration must expose this
+   in-process command before production acceptance.
 
    Original bytes remain in SQLite `sources`; original JSON is untouched and no
    longer consulted. Repeat confirmation is safe only with the same request ID;
-   the CLI refuses a second import after completion. IPC callers must retain
-   request IDs when recovering an uncertain result.
+   a second import otherwise fails. IPC callers must retain request IDs when
+   recovering an uncertain result.
 
-4. `migrate.cjs backup` uses the SQLite backup API. `restore <backup-id>` restores
+4. The same host command with `{"operation":"backup"}` uses the SQLite backup
+   API. `{"operation":"restore","args":["<backup-id>"]}` restores
    documents through a new transaction and changes epoch; active target leases
    block restore. It preserves current audit/request history. A structurally
    corrupt active database is deliberately **not** automatically replaced; stop
@@ -71,16 +74,48 @@ stdlib must be maintained as part of the installed trusted bundle.
 
    The account, code, database, tombstones, backups and source snapshots are
    retained. Final removal or reinstall is a separate administrator decision.
+   `launchctl disable` also prevents loading at the next boot; `bootout` stops
+   the current instance. Re-enable deliberately with `launchctl enable
+   system/com.orca.toolkit.config.<uid>` before bootstrap.
    Unload/rollback does not re-enable desktop JSON writes.
 
-IPC uses a fixed native bridge and Unix-domain socket, kernel `getpeereid` and
-`LOCAL_PEERTOKEN`, and Security.framework designated-requirement validation. The
-bridge verifies the server UID. Production requires Developer ID; the temporary
-native test deliberately uses a pinned ad-hoc CDHash. The latter does not prove
-production signing/notarization or LaunchDaemon deployment has been accepted.
-This authenticates the installed bridge and tenant, not the human intent of every
-same-UID caller that can invoke that bridge. The API remains restricted to named
-documents, patches, previews, backup identifiers, and target leases.
+IPC uses two independent code identities. The fixed Bridge verifies the service
+UID, then transfers its original stdin Unix socket using `SCM_RIGHTS`. The service
+checks the Bridge's kernel credentials and designated requirement, obtains the
+original channel's `LOCAL_PEERTOKEN`, and checks that live caller with
+`SecCodeCopyGuestWithAttributes(kSecGuestAttributeAudit)` / `SecCodeCheckValidity`.
+It reads the JSON **from that same original channel**, not from a Bridge-supplied
+copy. A claimed PID, UID, executable path, requirement, name or audit token in JSON
+has no authority. Plain pipes/files, missing/extra/truncated FDs, direct unsigned
+clients and signed Bridges launched by unapproved programs fail before dispatch.
+The Node client uses its native socketpair stdin, with a bounded newline frame.
+
+Production enrollment additionally requires a root-protected, resource-sealed
+Developer ID app, hardened runtime, no debugger/library-validation/DYLD/unsigned
+executable-memory exemptions, bundle ID `com.stablyai.orca` or
+`com.stablyai.orca.toolkit`, and signed Info.plist integer
+`OrcaToolkitConfigClient=1`. This opt-in is a publisher assertion that the enrolled
+process runs only reviewed Toolkit code: no arbitrary CLI scripts, stdin eval,
+external writable plugins, debug ports, or raw configuration proxy exposed to
+untrusted programs. Security.framework authenticates code, not a JavaScript
+module inside a general interpreter. The administrator must review that contract.
+The installer derives the designated requirement and pins the exact CDHashes of
+the approved release in the root-owned LaunchDaemon arguments. App upgrades need
+explicit re-enrollment. Request arguments/environment cannot override the policy.
+For Electron, RunAsNode, NODE_OPTIONS and CLI inspection fuses must be off, and
+embedded ASAR integrity and ASAR-only loading must be on before signing.
+
+**Current Orca RUN_AS_NODE plugin workers do not satisfy this contract and cannot
+be enrolled.** This repository does not contain the Orca host build. Integrating
+Toolkit into a suitably sealed, signed caller process is an outstanding production
+prerequisite, not something this installer silently fixes by relaxing identity.
+The native acceptance tests use explicitly pinned synthetic signed Orca caller
+fixtures; they do not claim that the currently installed Orca package is approved.
+Production Developer ID/notarization, host integration and LaunchDaemon acceptance
+remain manual release gates. No same-UID or generic interpreter fallback exists.
+
+References: [Apple guest identity API](https://developer.apple.com/documentation/security/seccodecopyguestwithattributes(_:_:_:_:))
+and [Electron fuse semantics](https://www.electronjs.org/docs/latest/tutorial/fuses).
 
 State: `/Library/Application Support/OrcaToolkitState/<uid>` (0700); SQLite and
 journal 0600; socket directory is the persistent sibling `run` (0755), owned by

@@ -41,6 +41,11 @@
         "id": "toolkit.pause-downloads",
         "title": "Toolkit: Pause All Downloads",
         "context": "global"
+      },
+      {
+        "id": "toolkit.configuration",
+        "title": "Toolkit: Configuration Maintenance",
+        "context": "global"
       }
     ],
     "keybindings": [

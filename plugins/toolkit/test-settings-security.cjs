@@ -25,3 +25,22 @@ test('Windows retains JSON without starting config service or Python',t=>{
  const root=temp(t);t.mock.method(cp,'spawnSync',()=>{throw Error('No helper on Windows');});settings.save(root,settings.defaults(),undefined,'win32');assert.deepEqual(settings.load(root,null,'win32'),settings.defaults());
  const p=require('./download-preferences.cjs').forPlatform('win32');assert.equal(p.rememberFolder(root,'/synthetic'),true);assert.equal(p.defaultFolder(root,root),'/synthetic');
 });
+test('two macOS Controllers merge independent changes and reject stale overlapping saves',async t=>{
+ fixture.install(t);const {Controller}=require('./controller.cjs'),root=temp(t);
+ const runtime={platform:'darwin',configDir:root,downloadsDir:path.join(root,'downloads'),home:root};
+ const options={runtime,gpu:{async status(){return {online:false};}},accounts:{}};
+ const a=new Controller(options),b=new Controller(options),stale=new Controller(options);
+ t.after(async()=>{await a.close();await b.close();await stale.close();});
+ const one=structuredClone(a.settings);one.gpu.enabled=false;await a.update(one);
+ const two=structuredClone(b.settings);two.accounts.environment='Other';await b.update(two);
+ assert.equal(b.settings.gpu.enabled,false);assert.equal(b.settings.accounts.environment,'Other');
+ const conflict=structuredClone(stale.settings);conflict.gpu.enabled=false;await assert.rejects(stale.update(conflict),/conflict/);
+});
+test('sparse migration supplies UI defaults while preserving exact unknown JSON numbers',t=>{
+ const raw='{"future":{"big":9007199254740993123456789,"fraction":0.123456789012345678901},"gpu":{"enabled":true}}';
+ fixture.install(t,{settings:Buffer.from(raw).toString('base64'),'downloads-preferences':null});const root=temp(t);
+ const value=settings.load(root,null,'darwin');assert.equal(value.downloads.sshPort,22);assert.equal(value.accounts.enabled,true);
+ const next=settings.defaults();next.gpu.enabled=false;settings.save(root,next,value,'darwin');
+ const saved=client.request({op:'read',namespace:'settings'}).raw_json;
+ assert.ok(saved.includes('9007199254740993123456789'));assert.ok(saved.includes('0.123456789012345678901'));assert.equal(JSON.parse(saved).gpu.enabled,false);
+});

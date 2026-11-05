@@ -61,4 +61,22 @@ test('v3 real SSHSIG registration, signed metadata, retry and cleanup against au
  assert.deepEqual(await tr.prepare(job),meta);
  t.mock.method(config,'mutate',()=>({released:job.id}));await tr.cleanup(job);assert.equal(job.cleanup_verified,true);assert.equal(fs.existsSync(path.join(tr.directory(job),'key')),false);
  assert.equal(invoke('request',{op:'status',task_id:job.id}).state,'REVOKED');
+ // Exercise v3 through the actual manager lifecycle, including process-style
+ // reconstruction. Only range transport is synthetic; registration/receipts use
+ // real SSHSIG, Ed25519 and persistent authority SQLite above.
+ const {DownloadManager}=require('./engine.cjs');
+ const options={dataDir:path.join(root,'manager'),runtime:tr.runtime,environment:'test',sshHost:'100.64.0.20',sshUser:'reader',sshPort:22};
+ const manager=new DownloadManager(options);let entered;
+ const reading=new Promise(resolve=>{entered=resolve;});
+ Object.assign(manager.transport,{trust,manage:tr.manage,read:async(_job,_offset,_length,signal)=>{entered();await new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(Error('Paused')),{once:true}));}});
+ const created=await manager.create({source,folder:path.join(root,'output'),concurrency:1});await reading;
+ await manager.action(created.id,'pause');assert.equal(manager.jobs.get(created.id).status,'paused');
+ assert.ok(fs.existsSync(path.join(manager.transport.directory(manager.jobs.get(created.id)),'key')));await manager.close();
+ const resumed=new DownloadManager(options);t.after(()=>resumed.close());
+ Object.assign(resumed.transport,{trust,manage:tr.manage,read:async(_job,offset,length,_signal,onData)=>onData(fs.readFileSync(source).subarray(offset,offset+length),0)});
+ await resumed.action(created.id,'resume');await resumed.runs.get(created.id)?.promise;
+ const complete=resumed.jobs.get(created.id);assert.equal(complete.status,'complete');assert.equal(complete.cleanup_verified,true);assert.equal(complete.authorizationState,'revoked');
+ assert.equal(fs.readFileSync(complete.destination,'utf8'),'PAYLOAD');assert.equal(fs.existsSync(path.join(resumed.transport.directory(complete),'key')),false);
+ assert.equal(invoke('request',{op:'status',task_id:complete.id}).state,'REVOKED');await resumed.close();
+
 });
