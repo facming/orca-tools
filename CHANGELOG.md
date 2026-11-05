@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-06 — 阶段 7B-7（RELEASE BLOCKED）
+
+- 修复 macOS 完整设置快照含未知字段时保存失败；只 patch 已知字段，保留未知嵌套数据和精确数字。
+- Host handler 接入原生调用撤销与 28 秒超时；新增跨仓库 authority/FD 3/SCM_RIGHTS/双 Security.framework/SQLite、并发、异常退出和 FD 生命周期验证。
+- localhost 配置端点与公开配置命令拒绝访问；维护面板迁到 Host 自有 preload 合约。
+- 合成身份测试明确标注；正式签名包、跨 UID、完整 Host task/UI 迁移未完成，维持 RELEASE BLOCKED。见 [实施与验证记录](docs/toolkit-host-7b7.md)。
+
+
 ## 2026-11-05 — macOS Orca 宿主集成阶段 7B-5（Draft / Host blocked）
 
 - Toolkit 新增版本化可信 Host client 和供封印主进程纳入的固定 Bridge handler；settings、下载偏好与 target lease 使用同一异步通道，SQLite/Bridge/原始调用者双重签名规则不变。

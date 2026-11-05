@@ -1,5 +1,7 @@
 # Toolkit trusted Host API — 阶段 7B-6
 
+> 阶段 7B-7 实现与最新限制见 [7B-7 记录](toolkit-host-7b7.md)。本文保留为 7B-6 审计快照。
+
 审计日期：2026-11-05（Asia/Shanghai）。状态：**开发准备，禁止生产 enrollment**。
 本阶段没有安装自定义 Orca、修改官方上游、部署系统服务或迁移真实用户数据。
 本文在 Toolkit 与 Orca fork 同步保存；Toolkit 是协议/Bridge 的所有者，Orca 是身份路由和签名包的所有者。

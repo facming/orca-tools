@@ -44,3 +44,20 @@ test('sparse migration supplies UI defaults while preserving exact unknown JSON 
  const saved=client.request({op:'read',namespace:'settings'}).raw_json;
  assert.ok(saved.includes('9007199254740993123456789'));assert.ok(saved.includes('0.123456789012345678901'));assert.equal(JSON.parse(saved).gpu.enabled,false);
 });
+
+test('macOS full loaded snapshot saves known fields without rewriting unknown numbers or nested fields',async t=>{
+ const raw='{"future":{"big":9007199254740993123456789,"fraction":0.123456789012345678901},"gpu":{"enabled":true,"future":9007199254740993123456789},"accounts":{"future":{"fraction":0.123456789012345678901}}}';
+ fixture.install(t,{settings:Buffer.from(raw).toString('base64'),'downloads-preferences':null});
+ const {Controller}=require('./controller.cjs'),root=temp(t);
+ const controller=new Controller({runtime:{platform:'darwin',configDir:root,downloadsDir:path.join(root,'downloads'),home:root},gpu:{async status(){return {online:false};}},accounts:{}});
+ t.after(()=>controller.close());
+ const value=structuredClone(controller.settings);value.gpu.enabled=false;
+ value.future.big=0;value.accounts.future.fraction=0; // Unknown UI fields are never submitted.
+ await controller.update(value);
+ const saved=client.request({op:'read',namespace:'settings'}).raw_json;
+ assert.equal((saved.match(/9007199254740993123456789/g)||[]).length,2);
+ assert.equal((saved.match(/0.123456789012345678901/g)||[]).length,2);
+ assert.equal(JSON.parse(saved).gpu.enabled,false);
+ assert.throws(()=>settings.validate({...value,gpu:{enabled:'false'}},{knownOnly:true}),/boolean/);
+ assert.throws(()=>settings.validate({...value,gpu:false},{knownOnly:true}),/module/);
+});

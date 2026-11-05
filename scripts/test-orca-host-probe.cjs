@@ -16,7 +16,7 @@ const start=hub.startServer;hub.startServer=options=>start({...options,port:0,gp
 export default activate;export {deactivate};`);
  let child,timer;
  try{
-  child=cp.fork(entry,[],{execPath:path.join(app,'Contents/MacOS/Orca'),execArgv:[],env:{HOME:home,TMPDIR:home,PATH:'/usr/bin:/bin',ELECTRON_RUN_AS_NODE:'1'},serialization:'json',stdio:['ignore','ignore','pipe','ipc']});
+  child=cp.fork(entry,[],{execPath:path.join(app,'Contents/MacOS/Orca'),execArgv:[],env:{HOME:home,TMPDIR:home,PATH:'/usr/bin:/bin',ELECTRON_RUN_AS_NODE:'1',ORCA_BACKGROUND_LAUNCH:'1'},serialization:'json',stdio:['ignore','ignore','pipe','ipc']});
   child.stderr.resume();let next=1;const waiting=new Map();
   const ready=new Promise((resolve,reject)=>{
    timer=setTimeout(()=>{child.kill();reject(Error('SDK probe timed out'));},20000);
@@ -32,7 +32,7 @@ export default activate;export {deactivate};`);
   const registered=await ready;assert.ok(registered.commands.includes('toolkit.configuration'));
   const invoke=(commandId,args)=>new Promise(resolve=>{const id=next++;waiting.set(id,resolve);child.send({orca:1,kind:'req',id,method:'command.invoke',params:{commandId,args}});});
   const status=await invoke('toolkit.configuration',{operation:'status'});
-  assert.match(status.error?.message,/sealed Host integration is required/);
+  assert.match(status.error?.message,/Host menu/);
   const opened=await invoke('toolkit.open',{openBrowser:false});assert.equal(opened.result.ready,true);
   const url=opened.result.url,html=await (await fetch(url)).text(),token=html.match(/const token='([a-f0-9]+)'/)[1];
   const state=await (await fetch(url+'api/status',{headers:{'X-Toolkit-Token':token}})).json();

@@ -24,7 +24,7 @@ async function startServer(options){
    }
    if(req.headers['x-toolkit-token']!==token&&req.headers['x-download-token']!==token)return send(403,{error:'Session changed. Reload this page.'});
    if(req.method==='GET'&&req.url==='/api/accounts')return send(200,await controller.readAccounts());
-   if(req.method==='GET'&&req.url==='/api/config-service')return send(200,await configuration({operation:'status'}));
+   if(options.runtime.platform==='darwin'&&['/api/config-service','/api/configuration'].includes(req.url))return send(403,{error:'Open configuration maintenance from the Orca Host menu. Localhost tokens do not authorize configuration access.'});
    if(req.method==='GET'&&req.url==='/api/status'){if(options.runtime.configClient)try{await controller.reloadConfiguration();}catch{}return send(200,await controller.status());}
    if(req.method==='GET'&&['/api/gpu/native','/api/gpu/workflows','/api/gpu/health'].includes(req.url)){
     controller.requireGpu();

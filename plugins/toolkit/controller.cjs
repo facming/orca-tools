@@ -60,7 +60,7 @@ class Controller {
  async update(value){
   if(this.loading)throw new ToolkitError('Settings update is in progress.');
   if(this.settingsError)throw new ToolkitError(this.settingsError);
-  const next=settings.validate(value);
+  const next=settings.validate(value,{knownOnly:this.runtime.platform==='darwin'});
   this.loading=(async()=>{
    // Never silently move a live/resumable task to another server.
    const old=this.settings.downloads;

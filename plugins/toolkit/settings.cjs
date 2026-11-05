@@ -4,14 +4,15 @@ const {ToolkitError}=require('./platform/errors.cjs');
 const {validate:validateDownload}=require('./modules/downloads/settings.cjs');
 const configService=require('./config-service/client.cjs');
 const defaults=()=>({accounts:{enabled:true,environment:'',worktree:''},downloads:{enabled:true,environment:'',sshHost:'',sshUser:'',sshPort:22},gpu:{enabled:true}});
-function validate(value){
+function validate(value,{knownOnly=false}={}){
  if(!value||typeof value!=='object'||Array.isArray(value))throw new ToolkitError('Expected settings object.');
- if(Object.keys(value).some(k=>!['accounts','downloads','gpu'].includes(k)))throw new ToolkitError('Unknown settings section.');
+ if(!knownOnly&&Object.keys(value).some(k=>!['accounts','downloads','gpu'].includes(k)))throw new ToolkitError('Unknown settings section.');
  const result=defaults();
  for(const key of Object.keys(result)){
-  const input=value[key]||{};
-  if(typeof input!=='object'||Array.isArray(input)||Object.keys(input).some(k=>!(k in result[key])))throw new ToolkitError('Unknown module setting.');
+  const input=value[key]??{};
+  if(typeof input!=='object'||Array.isArray(input)||(!knownOnly&&Object.keys(input).some(k=>!Object.hasOwn(result[key],k))))throw new ToolkitError('Unknown module setting.');
   for(const [name,data] of Object.entries(input)){
+   if(knownOnly&&!Object.hasOwn(result[key],name))continue;
    if(name==='enabled'){if(typeof data!=='boolean')throw new ToolkitError('enabled must be boolean.');}
    else if(name==='sshPort'){if(!Number.isInteger(data)||data<1||data>65535)throw new ToolkitError('Invalid SSH port.');}
    else if(typeof data!=='string'||data.length>4096||/[\x00-\x1f]/.test(data))throw new ToolkitError('Invalid setting text.');
@@ -41,7 +42,7 @@ function load(root,downloadsDir,platform=process.platform,client=configService){
  }
  return result;
 }
-function save(root,value,previous,platform=process.platform,client=configService){const clean=validate(value);
+function save(root,value,previous,platform=process.platform,client=configService){const clean=validate(value,{knownOnly:platform==='darwin'});
  if(platform==='darwin')return client.save('settings',clean,previous);
  const file=path.join(root,'settings.json');fs.mkdirSync(root,{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(clean,null,2),{mode:0o600});fs.renameSync(file+'.tmp',file);return clean;}
 module.exports={defaults,validate,load,save};

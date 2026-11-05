@@ -15,7 +15,7 @@
 const $=id=>document.getElementById(id),buttons=['status','reload','preview','confirm','backup','restore','retry'];let preview=null,last=null,busy=false,unavailable=false;
 const render=()=>{for(const name of buttons)$('config-'+name).disabled=busy||(unavailable&&!['status','reload'].includes(name))||(name==='confirm'&&!preview)||(name==='retry'&&!last);};
 window.toolkitConfiguration={setState:state=>{unavailable=state.configService==='host-required';render();}};
-async function call(input){const response=await fetch('/api/configuration',{method:'POST',headers:{'Content-Type':'application/json','X-Toolkit-Token':'__TOKEN__'},body:JSON.stringify(input)});const result=await response.json();if(!response.ok)throw Error(result.error||'Configuration operation failed.');return result;}
+async function call(input){if(!window.orcaToolkitConfiguration)throw Error('Open configuration maintenance from the Orca Host menu.');return window.orcaToolkitConfiguration.call(input);}
 async function execute(input,retry=false){if(busy)return;busy=true;render();try{
 if(!retry){last={...input};if(['preview','confirm','restore'].includes(input.operation))last.request_id=crypto.randomUUID();}
 const result=await call(last);$('config-result').textContent=JSON.stringify({operation:last.operation,result},null,2);

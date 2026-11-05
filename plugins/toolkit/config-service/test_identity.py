@@ -179,6 +179,19 @@ const session={},handler=createHostHandler(s=>s===session,require(process.argv[3
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         print(result.stdout.strip())
 
+    @unittest.skipUnless(os.environ.get('TOOLKIT_AUTHORITY_BUNDLE') and os.environ.get('TOOLKIT_SOCKETPAIR_SOURCE'), 'Cross-repo authority bundle and socketpair source required')
+    def test_synthetic_main_authority_native_transport(self):
+        import shutil
+        addon=self.root/'authority-socketpair.node'
+        subprocess.run(['cc','-Wall','-Wextra','-Werror','-bundle','-undefined','dynamic_lookup',
+                        '-I'+os.environ.get('NODE_INCLUDE_DIR','/opt/homebrew/include/node'),
+                        os.environ['TOOLKIT_SOCKETPAIR_SOURCE'],'-o',str(addon)],check=True)
+        self.server.caller_authorize=signed_peer_authorizer(os.getuid(),self.requirement(Path(shutil.which('node')).resolve()),self.library)
+        result=subprocess.run(['node',str(self.source/'tests/authority.cjs'),os.environ['TOOLKIT_AUTHORITY_BUNDLE'],
+                               str(self.source.resolve()/'host-handler.cjs'),str(self.bridge),str(addon)],capture_output=True,text=True,timeout=40)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        print(result.stdout.strip())
+
     def test_toolkit_commands_native_contract(self):
         result = subprocess.run(['node', str(self.source/'tests/commands.cjs'), str(self.caller), str(self.bridge), str(self.impostor)], capture_output=True, text=True, timeout=40)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

@@ -6,22 +6,23 @@ const BRIDGE='/Library/PrivilegedHelperTools/OrcaToolkit/config-bridge';
 const OFFLINE={ok:false,error:'Configuration service unavailable; result may be unknown. Retry with the same request_id.'};
 // createSocketPair MUST be an in-process native binding. An external helper
 // would make the helper, not the Host, the kernel-authenticated socket creator.
-function requestBridge(request,createSocketPair){
+function requestBridge(request,createSocketPair,signal){
  return new Promise(resolve=>{
   let child,channel,timer,settled=false,hostFd,bridgeFd;
   const closeFd=fd=>{if(Number.isInteger(fd))try{fs.closeSync(fd);}catch{}};
-  const finish=result=>{if(settled)return;settled=true;clearTimeout(timer);channel?.destroy();closeFd(hostFd);closeFd(bridgeFd);resolve(result);};
-  const fail=()=>{child?.kill();finish(OFFLINE);};
+  const finish=result=>{if(settled)return;settled=true;clearTimeout(timer);signal?.removeEventListener('abort',fail);channel?.destroy();closeFd(hostFd);closeFd(bridgeFd);resolve(result);};
+  const fail=()=>{child?.kill('SIGKILL');finish(OFFLINE);};
   try{
-   if(typeof createSocketPair!=='function')return finish(OFFLINE);
+   if(signal?.aborted||typeof createSocketPair!=='function')return finish(OFFLINE);
    ({hostFd,bridgeFd}=createSocketPair());
    if(!Number.isInteger(hostFd)||!Number.isInteger(bridgeFd)||hostFd<0||bridgeFd<0||hostFd===bridgeFd)throw Error('Invalid channel');
+   signal?.addEventListener('abort',fail,{once:true});
    channel=new net.Socket({fd:hostFd,readable:true,writable:true});hostFd=undefined;
    channel.on('error',fail);
    child=cp.spawn(BRIDGE,[],{env:{PATH:'/usr/bin:/bin'},stdio:['ignore','pipe','ignore',bridgeFd]});
    closeFd(bridgeFd);bridgeFd=undefined;
    const chunks=[];let size=0;
-   timer=setTimeout(fail,31000);
+   timer=setTimeout(fail,28000);
    child.on('error',fail);
    child.stdout.on('error',fail);
    child.stdout.on('data',chunk=>{size+=chunk.length;if(size>2*1024*1024)fail();else chunks.push(chunk);});
@@ -37,12 +38,14 @@ function requestBridge(request,createSocketPair){
 }
 function createHostHandler(authorizeSession,{createSocketPair}={}){
  if(typeof authorizeSession!=='function')throw Error('Host-owned sealed Toolkit session authorizer required');
- return async function handle(envelope,session){
+ return async function handle(envelope,session,signal){
   // Session is supplied by the Host connection table, never by the payload.
-  if(await authorizeSession(session)!==true)return {ok:false,error:'Unauthorized Toolkit configuration session.'};
   try{
+   if(signal?.aborted||await authorizeSession(session)!==true)return {ok:false,error:'Unauthorized Toolkit configuration session.'};
    if(!envelope||envelope.version!==1||Object.keys(envelope).some(k=>!['version','request'].includes(k)))throw Error();
-   return await requestBridge(validate(envelope.request),createSocketPair);
+   const request=JSON.parse(JSON.stringify(validate(envelope.request)));
+   if(signal?.aborted||await authorizeSession(session)!==true)return {ok:false,error:'Revoked Toolkit configuration session.'};
+   return await requestBridge(request,createSocketPair,signal);
   }catch{return {ok:false,error:'Invalid Toolkit configuration request.'};}
  };
 }

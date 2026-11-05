@@ -1,5 +1,5 @@
 'use strict';
-// Synthetic Host dispatch only. Uses production main.mjs/commands/HTTP/client,
+// Synthetic Host dispatch only. Public main.mjs command and HTTP access are denied;
 // then an ad-hoc native caller -> production relay -> dual Security checks -> SQLite.
 // NOT evidence of an authorized Orca Host (see test-orca-host-probe.cjs).
 const assert=require('node:assert/strict'),cp=require('node:child_process'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
@@ -26,7 +26,8 @@ const {METHOD}=require('../host-client.cjs');
  const plugin=await import('../../main.mjs');
  try{
   await plugin.default({host,commands:{register:(id,fn)=>commands.set(id,fn)},log(){}});
-  assert.equal(commands.size,6);const command=commands.get('toolkit.configuration');
+  assert.equal(commands.size,6);assert.throws(()=>commands.get('toolkit.configuration')({operation:'status'}),/Host menu/);
+  const command=require('../commands.cjs').createCommands(require('../host-client.cjs').createHostClient({host}),{reload:()=>service.controller.reloadConfiguration()});
   if(phase==='offline'){
    await assert.rejects(command({operation:'status'}),/unavailable/);assert.equal((await service.controller.status()).configService,'unavailable');
    console.log('PASS: command reports native service offline');return;
@@ -46,10 +47,10 @@ const {METHOD}=require('../host-client.cjs');
   const version=r=>Object.fromEntries(['epoch','store_id','revision'].map(k=>[k,r[k]]));
   const read=()=>command({operation:'read',namespace:'settings'}),a=await read(),b=await read();
   const patch=(base,p,value)=>({operation:'patch',namespace:'settings',...version(base),patch:[{op:'set',path:p,value}]});
-  // Separate windows sharing one HTTP server retain their own base versions.
-  const [one,two]=await Promise.all([post(patch(a,['gpu','enabled'],false)),post(patch(b,['accounts','enabled'],false))]);
-  assert.equal(one.status,200);assert.equal(two.status,200);
-  assert.equal((await post(patch(b,['gpu','enabled'],false))).status,400);
+  // Synthetic Host-owned command clients retain independent base versions.
+  assert.equal((await post(patch(a,['gpu','enabled'],false))).status,403);
+  await Promise.all([command(patch(a,['gpu','enabled'],false)),command(patch(b,['accounts','enabled'],false))]);
+  await assert.rejects(command(patch(b,['gpu','enabled'],false)),/conflict/);
   let current=await read();assert.equal(JSON.parse(current.raw_json).accounts.enabled,false);assert.equal(JSON.parse(current.raw_json).gpu.enabled,false);
   assert.ok(current.raw_json.includes('9007199254740993123456789'));
   const backup=await command({operation:'backup'});
@@ -67,6 +68,6 @@ const {METHOD}=require('../host-client.cjs');
   const count=calls;await assert.rejects(command({operation:'status',pid:1}),/fields/);await assert.rejects(command({operation:'exec',script:'no'}),/Unknown/);assert.equal(calls,count);
   host.has=()=>false;await assert.rejects(command(),/sealed Host/);assert.equal(calls,count);
   assert.equal(fs.existsSync(path.join(root,'settings.json')),false);
-  console.log('PASS: Toolkit command/HTTP -> synthetic native Host -> Bridge -> signed peers -> SQLite; migration, concurrent windows, conflict, restore/retry, unauthorized, no fallback');
+  console.log('PASS: Toolkit command client (HTTP denied) -> synthetic native Host -> Bridge -> signed peers -> SQLite; migration, concurrent windows, conflict, restore/retry, unauthorized, no fallback');
  }finally{await plugin.deactivate();runtimeModule.createRuntime=originalRuntime;hub.startServer=originalStart;fs.rmSync(root,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});

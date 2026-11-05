@@ -37,7 +37,7 @@ test('maintenance UI previews exact bytes, confirms a snapshot, displays backup/
  const requests=[];let reloaded=0,fail=false;
  const command=createCommands(backend);
  // This fixture is already migrated; preview remains available for inspection.
- const window={dispatchEvent:()=>{reloaded++;},confirm:()=>true};
+ const window={dispatchEvent:()=>{reloaded++;},confirm:()=>true,orcaToolkitConfiguration:{call:async request=>{requests.push(request);if(fail)throw Error('service offline');return command(request);}}};
  vm.runInNewContext(source,{document:{getElementById:element},window,crypto,Event:class{},Uint8Array,btoa:s=>Buffer.from(s,'binary').toString('base64'),fetch:async(url,options)=>{
   assert.equal(url,'/api/configuration');assert.equal(options.headers['X-Toolkit-Token'],'__TOKEN__');const request=JSON.parse(options.body);requests.push(request);
   try{if(fail)throw Error('service offline');const result=await command(request);return {ok:true,json:async()=>result};}catch(e){return {ok:false,json:async()=>({error:e.message})};}
@@ -68,4 +68,28 @@ test('Host commands retain local legacy-task guard before target changes, import
  assert.equal(calls,0);await command({operation:'status'});assert.equal(calls,1);
  fs.writeFileSync(file,JSON.stringify({status:'complete',cleanupWarning:'unknown'}));assert.throws(()=>controller.prepareConfigurationChange({op:'import'}),/pending downloads/);
  fs.writeFileSync(file,JSON.stringify({status:'cancelled'}));controller.prepareConfigurationChange({op:'restore'});
+});
+
+test('localhost page token and correct Origin cannot invoke configuration or read service status',async t=>{
+ const os=require('node:os'),{startServer}=require('./server.cjs');
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-localhost-deny-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ let calls=0;
+ const configClient=createClient(async()=>{calls++;throw Error('host-required');});
+ const service=await startServer({port:0,runtime:{platform:'darwin',configDir:root,downloadsDir:path.join(root,'downloads'),home:root,configClient},gpu:{async status(){return {}; }},accounts:{}});
+ t.after(()=>service.close());
+ const html=await(await fetch(service.url)).text();
+ const token=html.match(/const token='([a-f0-9]+)'/)[1];
+ const headers={'X-Toolkit-Token':token,Origin:new URL(service.url).origin,'Content-Type':'application/json'};
+ const before=calls;
+ for(const request of [{method:'GET',path:'api/config-service'},{method:'POST',path:'api/configuration',body:JSON.stringify({operation:'status',pluginKey:'toolkit',session:'forged'})}]){
+  const result=await fetch(service.url+request.path,{method:request.method,headers,body:request.body});assert.equal(result.status,403);
+ }
+ assert.equal(calls,before);
+});
+
+test('revocation during async Host authorization prevents socket creation',async()=>{
+ let release,created=0;
+ const handler=createHostHandler(()=>new Promise(resolve=>{release=resolve;}),{createSocketPair:()=>{created++;throw Error('revoked');}});
+ const controller=new AbortController();const result=handler({version:1,request:{op:'status'}},{},controller.signal);
+ controller.abort();release(true);assert.equal((await result).ok,false);assert.equal(created,0);
 });

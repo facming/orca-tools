@@ -1,0 +1,42 @@
+'use strict';
+// SYNTHETIC Node identity + real main authority/native transport. Not signed Host acceptance.
+const assert=require('node:assert/strict'),cp=require('node:child_process'),fs=require('node:fs');
+const [bundle,handlerPath,bridge,addon]=process.argv.slice(2);
+const {ToolkitAuthority,TOOLKIT_CONFIGURATION_METHOD:METHOD}=require(bundle);
+const adapter={...require(handlerPath),...require(require('node:path').join(require('node:path').dirname(handlerPath),'commands.cjs'))};
+const spawn=cp.spawn,closed=[];let mode='native',onSpawn;
+cp.spawn=(file,args,options)=>{
+ assert.equal(file,'/Library/PrivilegedHelperTools/OrcaToolkit/config-bridge');
+ const child=mode==='exit'?spawn('/usr/bin/false',[],options):mode==='stall'?spawn('/bin/sleep',['60'],options):spawn(bridge,args,options);
+ closed.push(new Promise(resolve=>child.once('close',resolve)));
+ if(onSpawn)queueMicrotask(onSpawn);
+ return child;
+};
+const authority=new ToolkitAuthority(adapter,require(addon).createSocketPair);
+const envelope={version:1,request:{op:'status'}},approve=async()=>true;
+const call=context=>authority.call(context,METHOD,envelope,approve);
+(async()=>{
+ const context=authority.openContext();
+ assert.equal((await call({...context})).ok,false);
+ assert.equal((await authority.call(context,METHOD,{...envelope,session:context},approve)).ok,false);
+ const initial=await call(context);assert.equal(initial.ok,true,JSON.stringify(initial));
+ assert.equal(initial.result.state,'migration-pending');await Promise.all(closed);
+ const baseline=fs.readdirSync('/dev/fd').length;
+ const contexts=Array.from({length:3},()=>authority.openContext());
+ const replies=await Promise.all(contexts.flatMap(c=>Array.from({length:4},()=>call(c))));
+ assert.equal(replies.filter(r=>r.ok).length,12);
+ for(let i=0;i<12;i++)assert.equal((await call(context)).ok,true);
+ let release;const old=authority.openContext();
+ const pending=authority.call(old,METHOD,envelope,()=>new Promise(resolve=>{release=resolve;}));
+ authority.revoke(old);release(true);assert.equal((await pending).ok,false);
+ assert.equal((await call(old)).ok,false);
+ const next=authority.openContext();onSpawn=()=>authority.revoke(next);
+ assert.equal((await call(next)).ok,false);onSpawn=undefined;
+ mode='exit';for(let i=0;i<12;i++)assert.equal((await call(context)).ok,false);
+ mode='stall';assert.equal((await call(context)).ok,false);
+ mode='native';assert.equal((await call(context)).ok,true);
+ await Promise.all(closed);await new Promise(resolve=>setImmediate(resolve));
+ assert.ok(fs.readdirSync('/dev/fd').length<=baseline,'FD leak after concurrency, abnormal exit and revoke');
+ authority.revokeAll();assert.equal((await call(context)).ok,false);
+ console.log('PASS: SYNTHETIC identity; main authority -> actual socketpair/FD3/SCM_RIGHTS/Security.framework/SQLite; concurrency, revoke, reload, abnormal exit, timeout, FD lifetime');
+})().catch(e=>{console.error(e);process.exitCode=1;});
