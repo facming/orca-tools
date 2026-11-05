@@ -154,3 +154,17 @@ node --test --test-name-pattern='^(running macOS|missing, non-executable|profile
 ```
 
 本轮未调用真实 Accounts RPC，未执行远程下载、生成密钥或启动 GPU/ComfyUI，也未修改 TCC 或其他系统安全设置。原生目录选择的保存、取消、刷新保留及 TCC 拒绝仍需可操作的系统对话框验收；不能宣称阶段 1 实机验收全部通过。
+
+## 9. 人工目录选择失败与修复（2026-11-05）
+
+用户实际打开系统目录对话框并选择含中文、空格的测试目录后，页面返回 “The folder selection window could not finish.”，此项验收失败。非交互探针复现了 `set selection to <directory alias>` 的 AppleScript -10006 错误：`selection` 与只读属性冲突，故障发生在选择结果赋值处，尚未进入配置写入。此前仅编译脚本及替代 Node 子进程回执的测试未覆盖此运行时错误。
+
+Toolkit 1.3.2 改用 `chosenFolder` 接收 alias，并将交互命令分离为固定的 `requestFolder` handler。仍由固定脚本接收 argv，不拼接用户路径。新增 `test-macos-directory-picker.cjs`：测试脚本继承生产 `run` handler，仅替换需要点击的目录选择动作，由系统 osascript 执行真实的赋值、alias 转换和异常处理，再通过管理 HTTP 路由验证保存、取消与失败不改配置、重启后读取及 0600 配置权限。路径含中文、空格、引号及美元符号；原始错误继续脱敏。
+
+同一回归测试在临时源码副本恢复旧 `selection` 变量后按预期失败；修复后通过，生产脚本编译成功。以下套件结果为 7 通过、0 失败、3 跳过，Windows 用例未执行：
+
+```sh
+node --test --test-name-pattern='^(macOS AppleScript|running macOS|missing, non-executable|profile override|open and folder selection|macOS activation|all views share one shell)' plugins/toolkit/test-macos-directory-picker.cjs plugins/toolkit/test-platform.cjs plugins/toolkit/test-unified-ui.cjs
+```
+
+自动测试未操作原生对话框，不能替代人工点击验收。1.3.2 需通过 Orca 官方界面批准更新后，再验证选中保存、刷新保留与原生取消。第 8 节已确认的宿主空闲回收限制未在此次修复中处理。
