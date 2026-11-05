@@ -191,14 +191,14 @@ test('macOS activation shares one runtime, serves local previews and cannot star
     assert.equal(opts.runtime, r);
     return service = await start({...opts, port: 0});
   });
-  await plugin.default({commands: {register: (name, fn) => commands.set(name, fn)}, log() {}});
+  await plugin.default({host:{has:()=>true,async call(method,{request}){return {ok:true,result:require('./config-service/client.cjs').request(request)};}},commands: {register: (name, fn) => commands.set(name, fn)}, log() {}});
   t.after(() => plugin.deactivate());
   assert.equal(openGpu.mock.callCount(), 0);
   assert.equal(service.controller.accounts.runtime, r);
   assert.equal(service.controller.gpu.runtime, r);
   assert.equal(commands.size, 6);
   assert.equal(typeof commands.get('toolkit.configuration'), 'function');
-  assert.equal(commands.get('toolkit.configuration')({operation:'status'}).state, 'ready');
+  assert.equal((await commands.get('toolkit.configuration')({operation:'status'})).state, 'ready');
   const {url} = service;
   assert.equal(new URL(url).hostname, '127.0.0.1');
   for (const name of ['accounts', 'downloads']) {

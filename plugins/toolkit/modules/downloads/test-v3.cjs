@@ -80,3 +80,14 @@ test('v3 real SSHSIG registration, signed metadata, retry and cleanup against au
  assert.equal(invoke('request',{op:'status',task_id:complete.id}).state,'REVOKED');await resumed.close();
 
 });
+
+test('async Host lease release must finish before deleting task keys; rejection retains them',async t=>{
+ for(const reject of [false,true]){
+  const f=fixture(t);let release;
+  const entered=new Promise(resolve=>{f.tr.runtime={configClient:{mutate:async request=>{assert.equal(request.op,'lease-release');resolve();return new Promise((ok,bad)=>{release=()=>reject?bad(Error('Host offline')):ok({released:f.job.id});});}}};});
+  t.mock.method(config,'mutate',()=>{throw Error('direct Bridge fallback forbidden');});
+  f.tr.manage=async r=>f.sign({...f.payload,request_id:r.request_id,client_nonce:r.client_nonce});
+  const cleanup=f.tr.cleanup(f.job);await entered;assert.ok(fs.existsSync(f.key));release();
+  if(reject){await assert.rejects(cleanup,/Host offline/);assert.ok(fs.existsSync(f.key));}else{await cleanup;assert.equal(fs.existsSync(f.key),false);}
+ }
+});

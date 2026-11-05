@@ -220,3 +220,12 @@ temporary root-owned directory and uses existing `_www` as a distinct service UI
 it removes temporary processes/files on exit. It installs no LaunchDaemon.
 Neither test migrates real data or contacts a VPS. SIGKILL and SQLite allocation
 failure tests are not electrical power-loss or storage-controller fault tests.
+
+## Stage 7B-5 follow-up
+
+The Toolkit-side asynchronous Host adapter, bounded main-process integration
+component, versioned UI and structured maintenance commands are implemented.
+Installed Orca 1.4.249 still lacks the trusted method and cannot enroll. The real
+SDK probe confirms fail-closed behavior; positive native tests use a synthetic
+signed Host. See [Host integration and required changes](macos-orca-host-integration.md).
+This does not supersede the production release boundary above.

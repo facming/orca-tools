@@ -48,6 +48,7 @@ test('Mac manager can open before ComfyUI is ready and exposes only read-only Co
  await assert.rejects(gpu.mac.request('/api/import'),/Only ComfyUI/);
 });
 test('Toolkit Mac routes deny native operations while health/workflows work and Accounts stay passive',async t=>{
+ require('./fixtures/config-service.cjs').install(t);
  const f=fixture(t),state=await manager(t,f);
  const s=await startServer({runtime:f.runtime,dataDir:f.runtime.configDir,port:0});t.after(()=>s.close());
  const html=await (await fetch(s.url)).text(),token=html.match(/const token='([a-f0-9]+)'/)[1];

@@ -24,13 +24,13 @@ function validate(value){
  if(a.worktree&&!/^path:\//.test(a.worktree))throw new ToolkitError('Remote worktree must start with path:/');
  return result;
 }
-function load(root,downloadsDir,platform=process.platform){
+function load(root,downloadsDir,platform=process.platform,client=configService){
  if(platform==='darwin'){
-  const value=configService.read('settings');
+  return configService.mapResult(client.read('settings'),value=>{
   // Legacy imports may omit known sections/fields. Keep the service snapshot
   // object (and unknown values) while supplying UI defaults.
   for(const [section,fields] of Object.entries(defaults())){value[section]??={};for(const [key,v] of Object.entries(fields))if(!Object.hasOwn(value[section],key))value[section][key]=v;}
-  return value;
+  return value;});
  }
  fs.mkdirSync(root,{recursive:true});const file=path.join(root,'settings.json');
  if(fs.existsSync(file))return validate(JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'')));
@@ -41,7 +41,7 @@ function load(root,downloadsDir,platform=process.platform){
  }
  return result;
 }
-function save(root,value,previous,platform=process.platform){const clean=validate(value);
- if(platform==='darwin')return configService.save('settings',clean,previous);
+function save(root,value,previous,platform=process.platform,client=configService){const clean=validate(value);
+ if(platform==='darwin')return client.save('settings',clean,previous);
  const file=path.join(root,'settings.json');fs.mkdirSync(root,{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(clean,null,2),{mode:0o600});fs.renameSync(file+'.tmp',file);return clean;}
 module.exports={defaults,validate,load,save};

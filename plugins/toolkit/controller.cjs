@@ -1,6 +1,7 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path');
 const {ToolkitError}=require('./platform/errors.cjs');
+const config=require('./config-service/client.cjs');
 const settings=require('./settings.cjs'),{DownloadManager}=require('./modules/downloads/engine.cjs');
 const {validate:validateDownload}=require('./modules/downloads/settings.cjs');
 const {Accounts}=require('./modules/accounts.cjs'),{Gpu}=require('./modules/gpu.cjs');
@@ -12,9 +13,24 @@ class Controller {
   this.runtime.ensurePrivateDirectory?.(this.root);
   this.accountSnapshot=null;this.accountAvailability='preview';this.accountError='';this.accountRequest=0;
   this.accountPreferences=new AccountPreferences(this.root,{privateFiles:this.runtime.platform==='darwin'});
+  this.configClient=options.runtime.configClient||config;
+  if(options.runtime.configClient){this.settings=settings.defaults();this.settingsError='Configuration is loading.';return;}
   try{this.settings=settings.load(this.root,this.runtime.platform==='darwin'?null:this.runtime.downloadsDir,this.runtime.platform);}catch(e){this.settings=settings.defaults();this.settingsError=e instanceof ToolkitError?e.message:'Settings unavailable; original configuration retained.';}
  }
- async initialize(){await this.configureDownloads();}
+ async initialize(){if(this.runtime.configClient){try{await this.reloadConfiguration();}catch{}}else await this.configureDownloads();}
+ async reloadConfiguration(){
+  const run=(this.reloading||Promise.resolve()).catch(()=>{}).then(()=>this.loadConfiguration());this.reloading=run;
+  try{return await run;}finally{if(this.reloading===run)this.reloading=null;}
+ }
+ async loadConfiguration(){
+  if(this.loading)throw new ToolkitError('Settings update is in progress.');
+  const old=this.settings;
+  try{const next=await settings.load(this.root,null,this.runtime.platform,this.configClient);if(JSON.stringify(old.accounts)===JSON.stringify(next.accounts))next.accounts=old.accounts;this.settings=next;this.settingsError='';}
+  catch(e){this.settingsError=e instanceof ToolkitError?e.message:'Configuration unavailable.';if(this.downloads){await this.downloads.close();this.downloads=null;}this.accountRequest++;this.accountSnapshot=null;this.accountAvailability='error';throw e;}
+  if(JSON.stringify(old.accounts)!==JSON.stringify(this.settings.accounts)){this.accountRequest++;this.accountSnapshot=null;this.accountAvailability='preview';}
+  if(!this.downloads||JSON.stringify(old.downloads)!==JSON.stringify(this.settings.downloads))await this.configureDownloads();
+ }
+
  async configureDownloads(){
   if(this.downloads){await this.downloads.close();this.downloads=null;}
   this.downloadError='';this.downloadAvailability='needs-setup';if(!this.settings.downloads.enabled||!this.settings.downloads.environment)return;
@@ -27,6 +43,20 @@ class Controller {
    this.downloadAvailability=this.runtime.platform==='darwin'?'configured':'ready';
   }catch(e){this.downloadAvailability='error';this.downloadError=e instanceof ToolkitError?e.message:'Cannot initialize Downloads. Check settings and directory access.';}
  }
+ assertDownloadTargetIdle(){
+    const folder=path.join(this.runtime.downloadsDir,'jobs');
+    const jobs=this.downloads?.list()||[];
+    if(fs.existsSync(folder))for(const name of fs.readdirSync(folder)){
+     if(!/^[a-f0-9]{32}\.json$/.test(name))continue;
+     try{jobs.push(JSON.parse(fs.readFileSync(path.join(folder,name),'utf8')));}catch{throw new ToolkitError('A saved download could not be read. Repair it before changing the target.');}
+    }
+    if(jobs.some(j=>!['complete','cancelled'].includes(j.status)||j.cleanupWarning))throw new ToolkitError('Finish or cancel pending downloads and clear temporary access before changing the remote target.');
+ }
+ prepareConfigurationChange(request){
+  const target=['environment','sshHost','sshUser','sshPort'];
+  const changesTarget=request.op==='patch'&&request.namespace==='settings'&&request.patch.some(p=>p.path[0]==='downloads'&&(p.path.length===1||target.includes(p.path[1])));
+  if(changesTarget||['import','restore'].includes(request.op))this.assertDownloadTargetIdle();
+ }
  async update(value){
   if(this.loading)throw new ToolkitError('Settings update is in progress.');
   if(this.settingsError)throw new ToolkitError(this.settingsError);
@@ -35,16 +65,8 @@ class Controller {
    // Never silently move a live/resumable task to another server.
    const old=this.settings.downloads;
    const changedTarget=['environment','sshHost','sshUser','sshPort'].some(k=>old[k]!==next.downloads[k]);
-   if(changedTarget){
-    const folder=path.join(this.runtime.downloadsDir,'jobs');
-    const jobs=this.downloads?.list()||[];
-    if(fs.existsSync(folder))for(const name of fs.readdirSync(folder)){
-     if(!/^[a-f0-9]{32}\.json$/.test(name))continue;
-     try{jobs.push(JSON.parse(fs.readFileSync(path.join(folder,name),'utf8')));}catch{throw new ToolkitError('A saved download could not be read. Repair it before changing the target.');}
-    }
-    if(jobs.some(j=>!['complete','cancelled'].includes(j.status)||j.cleanupWarning))throw new ToolkitError('Finish or cancel pending downloads and clear temporary access before changing the remote target.');
-   }
-   const saved=settings.save(this.root,next,this.settings,this.runtime.platform);
+   if(changedTarget)this.assertDownloadTargetIdle();
+   const saved=await settings.save(this.root,next,this.settings,this.runtime.platform,this.configClient);
    const accountsChanged=JSON.stringify(saved.accounts)!==JSON.stringify(this.settings.accounts);
    const changed=JSON.stringify(saved.downloads)!==JSON.stringify(this.settings.downloads);
    this.settings=saved;this.settingsError='';
@@ -56,14 +78,14 @@ class Controller {
  async status(){
   let gpu={online:false};try{gpu=await this.gpu.status();}catch{}
   const preview=this.runtime.platform==='darwin';
-  return {settings:this.settings,error:this.settingsError,configService:this.runtime.platform==='darwin'?(this.settingsError?(this.settingsError.includes('migration')?'migration-pending':'not-installed'):'ready'):'json',modules:{
+  return {settings:this.settings,configurationVersion:this.configClient.version(this.settings),error:this.settingsError,configService:this.runtime.platform==='darwin'?(this.settingsError?(this.settingsError.includes('sealed Host')?'host-required':this.settingsError.includes('migration')?'migration-pending':'unavailable'):'ready'):'json',modules:{
    accounts:{enabled:this.settings.accounts.enabled,status:!this.settings.accounts.enabled?'disabled':preview?this.accountAvailability:this.settings.accounts.environment?'configured':'needs-setup',manualRefresh:preview,error:this.accountError,accountCount:this.accountSnapshot?.accounts.length??null},
    downloads:{enabled:this.settings.downloads.enabled,status:!this.settings.downloads.enabled?'disabled':this.downloadAvailability||'needs-setup',available:!!this.downloads,error:this.downloadError,jobs:this.downloads?.list().length||0},
    gpu:{...(this.runtime.platform==='darwin'?{godot:gpu.godot||{state:'error'}}:{}),enabled:this.settings.gpu.enabled,status:!this.settings.gpu.enabled?'disabled':gpu.online?'ready':'offline'}
   }};
  }
- requireDownloads(){if(!this.downloads||!this.settings.downloads.enabled)throw new ToolkitError(this.downloadError||'Configure and enable Downloads first.');return this.downloads;}
- requireAccounts(){if(!this.settings.accounts.enabled)throw new ToolkitError('Accounts module is disabled.');return this.settings.accounts;}
+ requireDownloads(){if(this.runtime.platform==='darwin'&&this.settingsError)throw new ToolkitError(this.settingsError);if(!this.downloads||!this.settings.downloads.enabled)throw new ToolkitError(this.downloadError||'Configure and enable Downloads first.');return this.downloads;}
+ requireAccounts(){if(this.runtime.platform==='darwin'&&this.settingsError)throw new ToolkitError(this.settingsError);if(!this.settings.accounts.enabled)throw new ToolkitError('Accounts module is disabled.');return this.settings.accounts;}
  async openAccounts(){this.requireAccounts();return {opened:true,url:'/accounts/'};}
  requireRemoteAccounts(){return this.requireAccounts();}
  // Passive macOS reads never construct RuntimeClient or touch pairing/profile data.
@@ -76,7 +98,7 @@ class Controller {
   const request=++this.accountRequest;
   try{
    const state=await operation();
-   if(this.settings.accounts!==settings)throw new ToolkitError('Remote connection changed. Refresh accounts.');
+   if(this.settingsError||this.settings.accounts!==settings)throw new ToolkitError('Remote connection changed. Refresh accounts.');
    const result=this.accountPreferences.apply(settings.environment,state);
    if(request===this.accountRequest){this.accountSnapshot=result;this.accountAvailability='ready';this.accountError='';}
    return result;
@@ -93,7 +115,7 @@ class Controller {
  async setAccountDisabled(body){
   if(Object.keys(body).some(k=>!['accountId','disabled'].includes(k))||typeof body.accountId!=='string'||!body.accountId||body.accountId.length>200||typeof body.disabled!=='boolean')throw new ToolkitError('Invalid account preference.');
   const settings=this.requireAccounts(),state=await this.accountState();
-  if(this.settings.accounts!==settings)throw new ToolkitError('Remote connection changed. Refresh accounts.');
+  if(this.settingsError||this.settings.accounts!==settings)throw new ToolkitError('Remote connection changed. Refresh accounts.');
   if(this.accounts.switching)throw new ToolkitError('An account switch is in progress. Refresh shortly.');
   if(!state.accounts.some(a=>a.id===body.accountId))throw new ToolkitError('Account not found. Refresh to try again.');
   this.accountPreferences.set(settings.environment,body.accountId,body.disabled);
@@ -105,8 +127,8 @@ class Controller {
   if(this.accountPreferences.disabled(settings.environment,body.accountId))throw new ToolkitError('Account is disabled. Enable it before switching.');
   return this.accountOperation(settings,()=>this.accounts.select(settings,body,()=>this.settings.accounts===settings&&settings.enabled&&!this.accountPreferences.disabled(settings.environment,body.accountId)));
  }
- requireGpu(){if(!this.settings.gpu.enabled)throw new ToolkitError('GPU module is disabled.');}
+ requireGpu(){if(this.runtime.platform==='darwin'&&this.settingsError)throw new ToolkitError(this.settingsError);if(!this.settings.gpu.enabled)throw new ToolkitError('GPU module is disabled.');}
  async openGpu(){this.requireGpu();return this.gpu.open();}
- async close(){if(this.loading)await this.loading.catch(()=>{});if(this.downloads)await this.downloads.close();}
+ async close(){if(this.reloading)await this.reloading.catch(()=>{});if(this.loading)await this.loading.catch(()=>{});if(this.downloads)await this.downloads.close();}
 }
 module.exports={Controller};

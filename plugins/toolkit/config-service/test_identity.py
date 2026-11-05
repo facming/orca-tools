@@ -136,6 +136,18 @@ class NativeIdentityTests(unittest.TestCase):
         self.assertFalse(result['ok'])
         self.assertIn('Unauthorized signed',result['error'])
 
+    def test_toolkit_commands_native_contract(self):
+        result = subprocess.run(['node', str(self.source/'tests/commands.cjs'), str(self.caller), str(self.bridge), str(self.impostor)], capture_output=True, text=True, timeout=40)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        print(result.stdout.strip())
+
+    def test_toolkit_commands_native_service_offline(self):
+        self.server.shutdown(); self.server.server_close(); self.thread.join()
+        (self.socket_dir/(str(os.getuid())+'.sock')).unlink()
+        result = subprocess.run(['node', str(self.source/'tests/commands.cjs'), str(self.caller), str(self.bridge), str(self.impostor), 'offline'], capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        print(result.stdout.strip())
+
     def test_direct_unapproved_client_rejected(self):
         with socket.socket(socket.AF_UNIX) as sock:
             sock.connect(str(self.socket_dir/(str(os.getuid())+'.sock')))

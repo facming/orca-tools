@@ -1,0 +1,36 @@
+<section id="configuration-maintenance" aria-label="Configuration maintenance">
+<h2>Configuration service</h2>
+<p>Preview both legacy documents before confirming migration. Existing JSON files remain unchanged. Backups stay in the isolated configuration service.</p>
+<div class="settings-grid">
+<fieldset><legend>Legacy settings</legend><label>Settings JSON <input id="config-settings-file" type="file" accept=".json,application/json"></label><label><input id="config-settings-defaults" type="checkbox"> Use default settings explicitly</label></fieldset>
+<fieldset><legend>Legacy download preferences</legend><label>Preferences JSON <input id="config-preferences-file" type="file" accept=".json,application/json"></label><label><input id="config-preferences-defaults" type="checkbox"> Use empty preferences explicitly</label></fieldset>
+</div>
+<div class="actions"><button id="config-status" class="button" type="button">Check service</button><button id="config-reload" class="button" type="button">Reload settings</button><button id="config-preview" class="button" type="button">Preview migration</button><button id="config-confirm" class="button" type="button" disabled>Confirm this migration</button><button id="config-backup" class="button" type="button">Create backup</button></div>
+<label>Backup ID <input id="config-backup-id" placeholder="backup-…sqlite" autocomplete="off"></label>
+<div class="actions"><button id="config-restore" class="button" type="button">Restore backup…</button><button id="config-retry" class="button" type="button" disabled>Retry last request</button></div>
+<pre id="config-result" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:28rem;overflow:auto"></pre>
+</section>
+<script nonce="__TOKEN__">
+(()=>{
+const $=id=>document.getElementById(id),buttons=['status','reload','preview','confirm','backup','restore','retry'];let preview=null,last=null,busy=false,unavailable=false;
+const render=()=>{for(const name of buttons)$('config-'+name).disabled=busy||(unavailable&&!['status','reload'].includes(name))||(name==='confirm'&&!preview)||(name==='retry'&&!last);};
+window.toolkitConfiguration={setState:state=>{unavailable=state.configService==='host-required';render();}};
+async function call(input){const response=await fetch('/api/configuration',{method:'POST',headers:{'Content-Type':'application/json','X-Toolkit-Token':'__TOKEN__'},body:JSON.stringify(input)});const result=await response.json();if(!response.ok)throw Error(result.error||'Configuration operation failed.');return result;}
+async function execute(input,retry=false){if(busy)return;busy=true;render();try{
+if(!retry){last={...input};if(['preview','confirm','restore'].includes(input.operation))last.request_id=crypto.randomUUID();}
+const result=await call(last);$('config-result').textContent=JSON.stringify({operation:last.operation,result},null,2);
+if(last.operation==='preview')preview=result;
+if(last.operation==='backup')$('config-backup-id').value=result.backup_id;
+if(['confirm','restore'].includes(last.operation)){preview=null;window.dispatchEvent(new Event('toolkit-configuration-reload'));}
+}catch(e){$('config-result').textContent=e.message;}finally{busy=false;render();}}
+async function source(kind){const file=$('config-'+kind+'-file').files[0],defaults=$('config-'+kind+'-defaults').checked;if(defaults&&file)throw Error('Choose either a file or defaults, not both.');if(defaults)return null;if(!file)throw Error('Select both JSON sources or explicitly choose defaults.');if(file.size>650000)throw Error('Source too large for the Toolkit upload (650 KB per document).');const bytes=new Uint8Array(await file.arrayBuffer());let raw='';for(let i=0;i<bytes.length;i+=8192)raw+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(raw);}
+for(const kind of ['settings','preferences'])for(const field of ['file','defaults'])$('config-'+kind+'-'+field).onchange=()=>{preview=null;render();};
+$('config-status').onclick=()=>execute({operation:'status'});
+$('config-reload').onclick=()=>window.dispatchEvent(new Event('toolkit-configuration-reload'));
+$('config-preview').onclick=async()=>{preview=null;render();try{await execute({operation:'preview',sources:{settings:await source('settings'),'downloads-preferences':await source('preferences')}});}catch(e){$('config-result').textContent=e.message;}};
+$('config-confirm').onclick=()=>{if(preview)return execute({operation:'confirm',preview_id:preview.preview_id,hashes:preview.hashes});};
+$('config-backup').onclick=()=>execute({operation:'backup'});
+$('config-restore').onclick=()=>{const backup_id=$('config-backup-id').value.trim();if(!/^backup-[a-f0-9]{32}\.sqlite$/.test(backup_id)){$('config-result').textContent='Enter a valid backup ID.';return;}if(window.confirm('Restore this backup? Both configuration documents will be replaced. Other windows must reload before saving.'))return execute({operation:'restore',backup_id});};
+$('config-retry').onclick=()=>{if(last)return execute(last,true);};
+})();
+</script>

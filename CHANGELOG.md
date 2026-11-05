@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-05 — macOS Orca 宿主集成阶段 7B-5（Draft / Host blocked）
+
+- Toolkit 新增版本化可信 Host client 和供封印主进程纳入的固定 Bridge handler；settings、下载偏好与 target lease 使用同一异步通道，SQLite/Bridge/原始调用者双重签名规则不变。
+- 结构化配置命令及 Mac 维护面板支持读取、字段修改、状态、迁移预览/确认、备份/恢复与结果；每窗口保留版本，冲突和旧 epoch 拒绝，未知结果重试保留 request_id。
+- 实查 Orca 1.4.249：RUN_AS_NODE worker 无独立签名身份，已有 host.call 但缺配置接口，缺签名 opt-in 且 fuses 不满足 enrollment。旧 Host 明确 host-required，不回退 JSON 或直接 Bridge。
+- 新增生产命令/Host handler/原生 Bridge/SQLite 合成宿主链测试及真实随包 worker 的隔离拒绝探针；Windows JSON、UI、GPU/MCP 回归保留。**真实获准 Orca 主进程成功调用仍待 Host 实现，不宣称生产集成完成。**
+- Host 修改范围、接口、命令参数和验证边界见 [宿主集成记录](docs/macos-orca-host-integration.md)。
+
 ## 2026-11-05 — macOS 安全存储与下载授权阶段 7B-3（Draft / 待审查）
 
 - H-02：独立 UID SQLite 单写服务、原生签名 IPC、字段版本冲突与请求幂等、未知 JSON 精度保留、显式迁移预览确认、一致备份/新 epoch 恢复、下载 target lease。macOS 不再写 settings/preferences JSON，缺服务不回退；Windows 保留。

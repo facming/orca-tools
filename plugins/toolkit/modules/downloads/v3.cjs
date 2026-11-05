@@ -81,7 +81,7 @@ class V3Transport extends SshTransport{
    if(!/^[1-9][0-9]*$/.test(receipt.revocation_commit_seq)||BigInt(receipt.revocation_commit_seq)<BigInt(job.revocationSequence||0))throw new ToolkitError('Stale revocation sequence.');
    job.cleanup_verified=true;job.receipt=envelope;job.revocationSequence=receipt.revocation_commit_seq;this.persist(job);
    // Commit proof before deleting only the locally bound, private task files.
-   config.mutate({op:'lease-release',task_id:job.id});
+   await (this.runtime?.configClient||config).mutate({op:'lease-release',task_id:job.id});
    const dir=this.directory(job);if(fs.existsSync(dir))privatePath(dir,true);
    for(const name of ['key.pub','known_hosts','key']){const file=path.join(dir,name);if(fs.existsSync(file)){privatePath(file);fs.unlinkSync(file);}}
    if(fs.existsSync(dir))fs.rmdirSync(dir);

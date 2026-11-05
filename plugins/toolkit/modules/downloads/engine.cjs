@@ -88,7 +88,7 @@ class DownloadManager {
     while(fs.existsSync(destination)||[...this.jobs.values()].some(j=>j.destination===destination&&j.status!=='cancelled')) destination=path.join(folder,`${stem} (${++suffix})${ext}`);
     const job={id,source,name:path.basename(destination),destination,partial:path.join(folder,`.${name}.${id}.part`),
       concurrency,chunk:4*1024*1024,status:'preparing',size:0,done:[],retries:0};
-    if(this.privateFiles&&!this.options.transport){job.protocol=3;require('../../config-service/client.cjs').mutate({op:'lease-acquire',task_id:id,target:Object.fromEntries(['environment','sshHost','sshUser','sshPort'].map(k=>[k,this.options[k]]))});}
+    if(this.privateFiles&&!this.options.transport){job.protocol=3;await (this.options.runtime?.configClient||require('../../config-service/client.cjs')).mutate({op:'lease-acquire',task_id:id,target:Object.fromEntries(['environment','sshHost','sshUser','sshPort'].map(k=>[k,this.options[k]]))});}
     this.jobs.set(id,job); this.save(job);
     this.start(job); return this.list().find(j=>j.id===id);
   }
