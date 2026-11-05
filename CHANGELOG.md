@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-05 — macOS 阶段 7A 最终集成前审计
+
+- 新增 `docs/macos-release-readiness-audit.md`，核验 #1–#9 的实际远程 SHA、Draft/base/head、Git DAG、重复补丁和安全修复继承；#5 两次修复完整进入 Godot/Blender/Unity，当前无需 rebase。
+- 给出专用 release 分支逐 PR 整合、基线同步、文档冲突处理和回滚方案；不合并 PR、不改 main/业务代码，不开始 7B；VRoid/Tripo 只保留审计文档。
+- 离线验证：Bridge 298 项（295 通过、3 Windows 专属跳过），Toolkit 82 项（81 通过、1 跳过），reader 两组通过，scripts 6 项（3 通过、3 跳过）。全部为 Mock/临时文件/回环，不代表真实 GPU、账号或 VPS 验收。
+- 临时夹具确认三项 HIGH：MCP 重定向转发 Bearer、通用设置临时文件链接覆盖、下载 authorized_keys 清理丢失并发更新。只记录问题，未修复；真实 Mac/VPS 验收（含 Unity C# 编译）为发布阻塞项。
+
 ## 2026-11-05 — macOS Unity 阶段 5C
 
 - 新增独立 Unity adapter、固定白名单 Editor API 扩展、四引擎 Toolkit 状态与安装打包；保留 Unity MCP 名称及 native 任务/下载协议。
