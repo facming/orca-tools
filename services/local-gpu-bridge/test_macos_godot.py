@@ -330,7 +330,17 @@ class GodotTests(unittest.TestCase):
             self.assertEqual(client.call('godot_stop', {'project_id': 'fixture'})['state'], 'stopped')
             for route in ('/v1/native/git', '/v1/native/read', '/v1/unity/start', '/v1/tripo/call'):
                 with self.assertRaisesRegex(ValueError, 'unsupported'): client.request(route, {})
-            with self.assertRaises(ValueError): client.call('capture_scene', {'project_id': 'fixture'})
+            calls_before, jobs_before = self.spawn.call_count, len(self.control.jobs)
+            for name, args in [('capture_scene', {}), ('run_project_script', {'script': 'test.gd'}),
+                               ('godot_operation', {'operation': 'run'})]:
+                for authorization in ({}, {'authorized': False}):
+                    with self.subTest(tool=name, authorization=authorization):
+                        # Direct HTTP client bypasses MCP schema: the backend
+                        # must independently reject missing/false consent.
+                        with self.assertRaises(ValueError):
+                            client.call(name, {'project_id': 'fixture', **args, **authorization})
+            self.assertEqual(self.spawn.call_count, calls_before)
+            self.assertEqual(len(self.control.jobs), jobs_before)
             self.assertEqual(client.call('list_workflows', {}), {'workflows': []})
 
     def test_mcp_legacy_payloads_and_new_operations(self):

@@ -462,3 +462,30 @@ python3 scripts/check.py
 - `git diff --check` 通过；`scripts/check.py` 检查 **172** 个源码/文档文件通过。原 malformed workflow 夹具预期日志不表示测试失败。
 
 **Mock 与真实验收。** 全部 Godot/Tailscale/ComfyUI/launchctl/信号操作仍使用 Mock、临时项目、合成 PNG 或回环测试服务；未读取真实凭据、启动用户 Godot、执行项目脚本、修改用户项目、连接 VPS、启动真实 GPU 或安装真实服务。真实 Mac 图形/驱动/权限、信号/LaunchAgent、Tailscale 回包和 Windows 原生验收仍待人工授权。项目代码不是沙箱；进程组不等同 Job Objects；轮询和用户态撤销不能撤回已发送数据，也不构成内核原子隔离。同步不会消除这些已记录限制。
+
+## 17. PR #6 Godot MCP 必填授权修复（2026-11-05）
+
+工作区开始时干净；fetch 后本地与 `origin/feature/macos-godot` 均为 `87841d18a2092869bbe90dfe42d9866f7bcb1f2b`。本次只更新原 Godot 分支及现有 Draft PR #6，不改 main、不新建 PR、不合并。
+
+生产修改仅涉及 `plugin/client.py` 的两处 schema：`capture_scene.required` 改为 `project_id, authorized`，`run_project_script.required` 改为 `project_id, script, authorized`。`godot_operation` 原来的 `project_id, operation, authorized` 保持原样。三个工具均继续声明 authorized 为 boolean，无默认授权值，也不把 false 转换为 true。
+
+MCP 的 `check_args` 在调用客户端前拒绝缺少 required 字段和非布尔值。macOS 后端仍独立要求 `authorized is True` 及本地 `allow_scripts is True`；即使绕过 MCP schema 直接调用 Bridge，缺少 authorized 或 false 也必须拒绝。未修改后端、任务协议、进程或安全逻辑。
+
+**Windows 兼容性：** 共享 MCP schema 的变化也适用于 Windows，旧工具调用须显式提供 authorized（授权执行使用 true），省略字段不再通过 MCP。该字段仍位于任务信封顶层，不混入 Godot 参数。Windows 后端的网络隔离、项目脚本许可和 Job Objects 策略未改，旧 HTTP 协议仍保留。测试通过生产 MCP 调度和原 Windows NativeControl，验证显式 true 能正常排队，但不能绕过未就绪的网络隔离或被禁用的项目脚本权限；worker 使用 Mock，不执行 Windows/Godot 进程。`godot_operation` 仍保持其原 macOS 支持范围，没有新增 Windows 操作。
+
+**新增证据：** `test_godot_mcp_schema.py` 共 5 项，验证实际 `tools/list` 暴露的三个 required/boolean schema、三个工具缺少授权时在 stdio MCP 分发前拒绝、非布尔值拒绝、true/false 原样传递，以及 Windows 正常调用和安全门槛兼容。扩展原 Godot 回环 HTTP 用例，对三个工具分别验证缺少 authorized 和 authorized=false；拒绝后任务数和 Mock Popen 调用数不变。通过逐字比对确认 Windows native_control/native_process/native_script 和 macOS Godot 后端未修改，AST 比对确认 godot_operation 定义不变。
+
+执行命令：
+
+```sh
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_godot_mcp_schema.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_macos_godot.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+git diff --check
+python3 scripts/check.py
+```
+
+全部使用内存 MCP、临时合成项目、Mock worker/Popen 和回环测试服务。没有启动真实 Godot、执行用户脚本、连接真实 VPS、读取真实 Token 或改变系统权限。此修复不构成真实 Mac/Windows 验收，先前记录的沙箱、进程组及实机验证限制继续存在。
+
+最终结果：MCP schema/兼容性专项 **5/5 通过**；Godot 专项 **32/32 通过**；全部 Python Bridge **234 项，231 通过、0 失败、3 Windows 专属跳过**；全部 Toolkit Node **80 项，79 通过、0 失败、1 Windows 原生探针跳过**。`git diff --check` 和 `scripts/check.py`（173 个源码/文档文件）通过。原 malformed workflow 夹具日志属于预期异常，不表示测试失败；Windows 跳过项不计为实机通过。

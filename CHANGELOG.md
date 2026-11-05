@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-05 — PR #6 Godot MCP 显式授权修复
+
+- 将 capture_scene 和 run_project_script 的 authorized 加入 inputSchema.required；godot_operation 原有必填授权不变。MCP 缺少授权字段时在分发前拒绝。
+- 保留 macOS 后端 authorized=true 和本地脚本许可检查；缺少字段或 false 仍拒绝且不创建任务/进程。Windows 工具调用需显式提供授权字段，原网络隔离、脚本权限与执行策略不变。
+- 新增 5 项 MCP schema/分发/Windows 兼容测试，并扩展三个 Godot 工具的缺少/false 授权回环 HTTP 拒绝测试。全部 Python Bridge 234 项（231 通过、3 跳过），Toolkit Node 80 项（79 通过、1 跳过）。全部为 Mock 和临时数据，没有执行真实 Godot 或用户项目。
+
 ## 2026-11-05 — macOS Godot 阶段 5A
 
 - 新增独立 Mac Godot adapter：元数据发现已有 app/明确指定二进制、arm64/Mach-O/权限与 Godot 4.5+ stable major 4 编辑器能力检查；不安装或复制用户 Godot。
