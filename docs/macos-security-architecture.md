@@ -348,3 +348,25 @@ SQLite max_page_count 引发的 FULL 和 query_only 失败不能冒充这些测�
 
 **H-02/H-03：功能实现与上述临时环境测试已交付，但完整验收矩阵、独立审查和人工批准
 尚未完成，继续 HIGH OPEN / RELEASE BLOCKED；不得把此 Draft 当作生产放行证明。**
+
+
+## PR #14 — original configuration caller authentication
+
+The PR #13 Bridge-only boundary is superseded by two-hop authentication. The
+service authenticates both the Bridge connection and the original request socket,
+passed by SCM_RIGHTS. Both identities come from kernel audit tokens and separate
+administrator-pinned Security.framework requirements. The request is read from
+the authenticated original socket, preventing identity/request substitution. An
+unapproved same-UID program invoking the genuine signed Bridge is denied.
+Independent non-root service UID, lifetime writer lock, SQLite transactions,
+field conflict detection, migration sources, backups, restore epochs and download
+target leases remain unchanged.
+
+Caller enrollment includes a sealed application opt-in and exact release hashes.
+A generic Node binary or Electron RUN_AS_NODE host cannot establish Toolkit module
+identity. Current Orca worker packaging is therefore blocked pending a sealed
+caller integration; this is not a completed production deployment. See
+[deployment contract](macos-security-deployment.md) and
+[finalization evidence](security-finalization-validation.md). H-02's Bridge
+confused-deputy code path is repaired; release remains blocked on host integration,
+production signing, independent review and the existing H-03/manual gates.

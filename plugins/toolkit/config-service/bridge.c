@@ -1,4 +1,5 @@
-/* Fixed-endpoint signed bridge: no executable/path/env override. */
+/* Fixed endpoint relay. Pass the original channel, never a claimed PID/token or
+ * request bytes. The service authenticates and reads that channel itself. */
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/stat.h>
@@ -20,6 +21,22 @@ static int output(int fd, const char *p, size_t n) {
     while (n) { ssize_t r=write(fd,p,n); if(r<0 && errno==EINTR)continue;
         if(r<=0)return -1; p+=r;n-=r; } return 0;
 }
+int orca_relay(int fd) {
+    char control[CMSG_SPACE(sizeof(int))]={0}, marker='C';
+    struct iovec iov={&marker,1};
+    struct msghdr message={0};message.msg_iov=&iov;message.msg_iovlen=1;
+    message.msg_control=control;message.msg_controllen=sizeof(control);
+    struct cmsghdr *c=CMSG_FIRSTHDR(&message);
+    c->cmsg_level=SOL_SOCKET;c->cmsg_type=SCM_RIGHTS;c->cmsg_len=CMSG_LEN(sizeof(int));
+    int input=STDIN_FILENO;memcpy(CMSG_DATA(c),&input,sizeof(input));
+    if(sendmsg(fd,&message,0)!=1)return 74;
+    char *buf=malloc(MAX_FRAME+1);if(!buf)return 72;
+    size_t n=0;
+    for(;;){ssize_t r=read(fd,buf+n,MAX_FRAME-n);if(r<=0)return 75;n+=r;
+        if(buf[n-1]=='\n')break;if(n==MAX_FRAME)return 76;}
+    return output(STDOUT_FILENO,buf,n)?77:0;
+}
+
 int main(void) {
     alarm(30); signal(SIGPIPE,SIG_IGN);
     struct passwd *service=getpwnam(ORCA_SERVICE_ACCOUNT);
@@ -29,12 +46,5 @@ int main(void) {
     int fd=socket(AF_UNIX,SOCK_STREAM,0);uid_t uid;gid_t gid;
     if(fd<0 || connect(fd,(struct sockaddr*)&addr,sizeof(addr)) ||
        getpeereid(fd,&uid,&gid) || uid!=service->pw_uid)return 71;
-    char *buf=malloc(MAX_FRAME+1);if(!buf)return 72;
-    size_t n=fread(buf,1,MAX_FRAME+1,stdin);
-    if(n>MAX_FRAME || !n || memchr(buf,'\n',n))return 73;
-    if(output(fd,buf,n)||output(fd,"\n",1))return 74;
-    n=0;
-    for(;;){ssize_t r=read(fd,buf+n,MAX_FRAME-n);if(r<=0)return 75;n+=r;
-        if(buf[n-1]=='\n')break;if(n==MAX_FRAME)return 76;}
-    return output(STDOUT_FILENO,buf,n)?77:0;
+    return orca_relay(fd);
 }

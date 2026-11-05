@@ -42,7 +42,12 @@ def main():
         signature=subprocess.run(['/usr/bin/codesign','-d','--verbose=4',str(bridge)],capture_output=True,check=True).stderr.decode()
         requirement='cdhash H\"'+re.search(r'^CDHash=([a-f0-9]+)$',signature,re.M)[1]+'\"'
         subprocess.run(['/usr/bin/codesign','--verify','--strict','-R','='+requirement,str(bridge)],check=True)
-        args=['/usr/bin/python3',str(code/'service.py'),'--state',str(state),'--socket',str(run/(str(a.client_uid)+'.sock')),'--tenant',str(a.client_uid),'--requirement',requirement]
+        caller=code/'orca-caller'
+        subprocess.run(['/usr/bin/cc','-DBRIDGE="'+str(bridge)+'"',str(repo/'plugins/toolkit/config-service/tests/caller.c'),'-o',str(caller)],check=True)
+        subprocess.run(['/usr/bin/codesign','--force','--sign','-',str(caller)],check=True)
+        signature=subprocess.run(['/usr/bin/codesign','-d','--verbose=4',str(caller)],capture_output=True,check=True).stderr.decode()
+        caller_requirement='cdhash H"'+re.search(r'^CDHash=([a-f0-9]+)$',signature,re.M)[1]+'"'
+        args=['/usr/bin/python3',str(code/'service.py'),'--state',str(state),'--socket',str(run/(str(a.client_uid)+'.sock')),'--tenant',str(a.client_uid),'--requirement',requirement,'--caller-requirement',caller_requirement]
         result=subprocess.run(args+['--initialize'],user=svc.pw_uid,group=svc.pw_gid,extra_groups=[],capture_output=True)
         assert result.returncode==0,result.stderr
         log=open(root/'test.log','wb')
@@ -53,9 +58,11 @@ def main():
             if proc.poll() is not None:raise AssertionError((root/'test.log').read_text())
             time.sleep(.05)
         def request(r):
-            result=subprocess.run([str(bridge)],input=json.dumps(r).encode(),capture_output=True,user=a.client_uid,group=pwd.getpwuid(a.client_uid).pw_gid,extra_groups=[])
+            result=subprocess.run([str(caller)],input=(json.dumps(r)+'\n').encode(),capture_output=True,user=a.client_uid,group=pwd.getpwuid(a.client_uid).pw_gid,extra_groups=[])
             assert result.returncode==0,(result.returncode,result.stderr,(root/'test.log').read_text())
             reply=json.loads(result.stdout);assert reply['ok'],reply;return reply['result']
+        denied=subprocess.run([str(bridge)],input=b'{"op":"status"}\n',capture_output=True,user=a.client_uid,group=pwd.getpwuid(a.client_uid).pw_gid,extra_groups=[])
+        assert denied.returncode==0 and not json.loads(denied.stdout)['ok'],denied
         status=request({'op':'status'});assert status['state']=='migration-pending'
         preview=request({'op':'preview','request_id':uuid.uuid4().hex,'sources':{'settings':None,'downloads-preferences':None}})
         request({'op':'import','request_id':uuid.uuid4().hex,'preview_id':preview['preview_id'],'hashes':preview['hashes']})
@@ -77,7 +84,7 @@ for op in (lambda:os.unlink(root+'/state.sqlite'),lambda:os.rename(root,root+'-m
         spoof="import socket,sys; s=socket.socket(socket.AF_UNIX);s.connect(sys.argv[1]);s.sendall(b'{\"op\":\"status\"}\\n');print(s.recv(4096).decode())"
         result=subprocess.run(['/usr/bin/python3','-c',spoof,str(endpoint)],user=a.client_uid,group=pwd.getpwuid(a.client_uid).pw_gid,extra_groups=[],capture_output=True)
         assert b'Unauthorized signed IPC client' in result.stdout,result
-        print('PASS macOS native peer UID + designated code requirement; signed bridge accepted, unsigned client rejected')
+        print('PASS macOS native peer UID + designated code requirement; approved original caller accepted; direct signed bridge and unsigned client rejected')
         print('PASS macOS real different UID: DB/journal/WAL/SHM write, unlink, rename, hardlink, symlink denied')
         print('PASS explicit migration and service read; no production installation or user data accessed')
     finally:

@@ -1,5 +1,7 @@
 """Bounded Unix IPC; peer identity comes only from the kernel."""
 import ctypes
+import array
+import contextlib
 import os
 from pathlib import Path
 import socket
@@ -51,8 +53,9 @@ class Server(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
     request_queue_size = 32
 
-    def __init__(self, path, store, authorize):
+    def __init__(self, path, store, authorize, caller_authorize=None):
         self.store, self.authorize = store, authorize
+        self.caller_authorize = caller_authorize
         self.capacity = threading.BoundedSemaphore(32)
         # No unlink of an existing endpoint: launchd/systemd or an operator owns lifecycle.
         if os.path.lexists(path):
@@ -78,7 +81,13 @@ class Handler(socketserver.StreamRequestHandler):
         self.request.settimeout(30)
         try:
             actor = self.server.authorize(self.request)
-            r = receive(self.rfile)
+            with contextlib.ExitStack() as channels:
+                stream = self.rfile
+                if self.server.caller_authorize is not None:
+                    caller = channels.enter_context(receive_caller(self.request))
+                    actor = self.server.caller_authorize(caller)
+                    stream = channels.enter_context(caller.makefile('rb'))
+                r = receive(stream)
             if r.get('op') == 'read-range' and hasattr(self.server.store, 'stream_read'):
                 self.server.store.stream_read(actor, r, self.rfile, self.wfile, peer(self.request)[1])
             else:
@@ -96,12 +105,45 @@ class Handler(socketserver.StreamRequestHandler):
                 pass
 
 
+def receive_caller(sock):
+    """SCM_RIGHTS preserves kernel socket credentials; wire identities are ignored.
+
+    Read before buffered rfile consumes any data. Close every received descriptor,
+    including malformed/truncated messages, so denied calls cannot leak FDs.
+    """
+    fds = array.array('i')
+    try:
+        data, ancillary, flags, _ = sock.recvmsg(1, socket.CMSG_SPACE(16 * fds.itemsize))
+        for level, kind, raw in ancillary:
+            if level == socket.SOL_SOCKET and kind == socket.SCM_RIGHTS:
+                fds.frombytes(raw[:len(raw) - len(raw) % fds.itemsize])
+        if data != b'C' or flags & (socket.MSG_CTRUNC | socket.MSG_TRUNC) or len(fds) != 1:
+            raise PermissionError('Original caller channel required')
+        duplicate = os.dup(fds[0])
+        try:
+            caller = socket.socket(fileno=duplicate)
+        except OSError:
+            os.close(duplicate)
+            raise
+        caller.settimeout(30)
+        return caller
+    finally:
+        for fd in fds:
+            os.close(fd)
+
+
 def config_authorizer(tenant, requirement):
     if os.geteuid() in (0, tenant):
         raise PermissionError('Configuration service requires independent non-root UID')
     protected_ancestors(Path(__file__).resolve())
     library = ctypes.CDLL(str(Path(__file__).with_name('peer_identity.dylib')))
+    return signed_peer_authorizer(tenant, requirement, library)
+
+
+def signed_peer_authorizer(tenant, requirement, library):
+    """Used by both hops. Production construction also enforces service isolation."""
     library.orca_verify_peer.argtypes = [ctypes.c_int, ctypes.c_char_p]
+    library.orca_verify_peer.restype = ctypes.c_int
     def check(sock):
         uid, pid = peer(sock)
         if uid != tenant:

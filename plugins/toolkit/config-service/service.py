@@ -13,10 +13,12 @@ if __name__ == '__main__':
     p.add_argument('--socket', required=True)
     p.add_argument('--tenant', type=int, required=True)
     p.add_argument('--requirement', required=True)
+    p.add_argument('--caller-requirement', required=True)
     p.add_argument('--initialize', action='store_true', help='Explicit empty installation only; never overwrites')
     a = p.parse_args()
     protected_ancestors(a.state)
     auth = config_authorizer(a.tenant, a.requirement)
+    caller_auth = config_authorizer(a.tenant, a.caller_requirement)
     native = ctypes.CDLL(str(Path(__file__).with_name('peer_identity.dylib')))
     native.orca_local_storage.argtypes = [ctypes.c_char_p]
     if native.orca_local_storage(os.fsencode(a.state)) != 0:
@@ -24,7 +26,7 @@ if __name__ == '__main__':
     store = ConfigStore(a.state, a.initialize)
     if not a.initialize:
         try:
-            with Server(a.socket, store, auth) as server:
+            with Server(a.socket, store, auth, caller_auth) as server:
                 server.serve_forever()
         finally:
             store.close()

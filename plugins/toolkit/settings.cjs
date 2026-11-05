@@ -25,7 +25,13 @@ function validate(value){
  return result;
 }
 function load(root,downloadsDir,platform=process.platform){
- if(platform==='darwin')return configService.read('settings');
+ if(platform==='darwin'){
+  const value=configService.read('settings');
+  // Legacy imports may omit known sections/fields. Keep the service snapshot
+  // object (and unknown values) while supplying UI defaults.
+  for(const [section,fields] of Object.entries(defaults())){value[section]??={};for(const [key,v] of Object.entries(fields))if(!Object.hasOwn(value[section],key))value[section][key]=v;}
+  return value;
+ }
  fs.mkdirSync(root,{recursive:true});const file=path.join(root,'settings.json');
  if(fs.existsSync(file))return validate(JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'')));
  const result=defaults();if(!downloadsDir)return result;

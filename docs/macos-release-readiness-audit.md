@@ -392,3 +392,13 @@ Python Bridge **301 项：298 通过、3 既有平台/原生环境跳过、0 失
 Developer ID 发行包、launchd/systemd/全入口 SSH 策略和生产部署审批未完成。
 既有 Accounts/ComfyUI/Godot/Blender/Unity 回归通过不代表真实 GUI/引擎实机验收完成。
 main、真实 VPS、个人 SSH 授权和用户真实配置未改动。
+
+### PR #14 caller authentication finalization
+
+See [finalization evidence](security-finalization-validation.md). The service now
+verifies the original request socket's audit token/code requirement as well as the
+Bridge. Native positive/negative identity tests and the full related regression
+suite pass. This is not production approval: current RUN_AS_NODE Orca workers are
+rejected until a sealed Toolkit caller is integrated and reviewed. Production
+signing/notarization, actual LaunchDaemon, sudo cross-UID retest, VPS sshd, real
+migration and Windows native acceptance remain manual. Keep Draft/release blocked.

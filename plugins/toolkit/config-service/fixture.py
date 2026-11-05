@@ -9,7 +9,8 @@ if __name__ == '__main__':
     store=ConfigStore(root,initialize)
     try:
         if initialize:
-            p=store.handle(501,request('preview',sources={k:None for k in DEFAULTS}))
+            raw=sys.stdin.buffer.read()
+            p=store.handle(501,request('preview',sources=loads(raw) if raw else {k:None for k in DEFAULTS}))
             store.handle(501,request('import',preview_id=p['preview_id'],hashes=p['hashes']))
         else:
             try:print(dumps({'ok':True,'result':store.handle(501,loads(sys.stdin.buffer.read()))}))
