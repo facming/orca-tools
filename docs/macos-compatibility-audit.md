@@ -167,4 +167,6 @@ Toolkit 1.3.2 改用 `chosenFolder` 接收 alias，并将交互命令分离为�
 node --test --test-name-pattern='^(macOS AppleScript|running macOS|missing, non-executable|profile override|open and folder selection|macOS activation|all views share one shell)' plugins/toolkit/test-macos-directory-picker.cjs plugins/toolkit/test-platform.cjs plugins/toolkit/test-unified-ui.cjs
 ```
 
-自动测试未操作原生对话框，不能替代人工点击验收。1.3.2 需通过 Orca 官方界面批准更新后，再验证选中保存、刷新保留与原生取消。第 8 节已确认的宿主空闲回收限制未在此次修复中处理。
+用户随后明确批准 `1a5f3ee` 的 1.3.2 更新。已通过 Orca 官方界面确认本地来源、安装并启用，49 个插件文件与该提交一致，实际页面显示 v1.3.2，GPU 管理端口未监听。本地数据目录权限为 0700。已从新版 Downloads 打开真实目录窗口，等待用户点击后复核结果。
+
+自动测试未操作原生对话框，不能替代人工点击验收。选中保存、刷新保留与原生取消仍待复验。第 8 节已确认的宿主空闲回收限制未在此次修复中处理。
