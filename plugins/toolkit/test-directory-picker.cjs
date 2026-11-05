@@ -13,9 +13,9 @@ test('cancel and overlapping dialog requests are handled without changing path',
  let complete;const picker=new DirectoryPicker({childEnv:{}},{platform:'win32',execute:()=>new Promise(r=>{complete=r;})});
  const first=picker.choose('');await assert.rejects(picker.choose(''),/already open/);complete({stdout:'{"cancelled":true}'});assert.deepEqual(await first,{cancelled:true});assert.equal(picker.pending,null);
 });
-test('picker rejects invalid responses and preferences failures remain nonfatal',async()=>{const f=fixture();try{
+test('picker rejects invalid responses and preferences failures are reported on macOS and remain nonfatal on Windows',async()=>{const f=fixture();try{
  const picker=new DirectoryPicker({childEnv:{}},{platform:'win32',execute:async()=>({stdout:'{"cancelled":false,"path":"relative"}'})});await assert.rejects(picker.choose(''),/absolute folder/);
- const bad=path.join(f.root,'not-a-directory');fs.writeFileSync(bad,'x');assert.equal(preferences.rememberFolder(bad,f.selected),false);assert.equal(preferences.defaultFolder(bad,f.root),path.join(f.root,'Downloads','Orca'));
+ const bad=path.join(f.root,'not-a-directory');fs.writeFileSync(bad,'x');if(process.platform==='darwin'){assert.throws(()=>preferences.rememberFolder(bad,f.selected),/settings/);assert.throws(()=>preferences.defaultFolder(bad,f.root),/settings/);}else{assert.equal(preferences.rememberFolder(bad,f.selected),false);assert.equal(preferences.defaultFolder(bad,f.root),path.join(f.root,'Downloads','Orca'));}
  }finally{f.clean();}});
 test('HTTP directory picker requires local authorization and remembers selection across restart',async()=>{const f=fixture();let service;try{
  let cancelled=false,calls=0;

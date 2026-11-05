@@ -6,6 +6,31 @@ const cp = require('node:child_process');
 const zlib = require('node:zlib');
 const {promisify} = require('node:util');
 const execFile = promisify(cp.execFile);
+const crypto = require('node:crypto');
+
+// Both transports execute the exact same reader and lock protocol.
+function remoteModule(){
+ const files={'private_files.py':fs.readFileSync(path.join(__dirname,'../../private_files.py')),'remote-reader.py':fs.readFileSync(path.join(__dirname,'remote-reader.py'))};
+ const revision=crypto.createHash('sha256').update(Buffer.concat(Object.values(files))).digest('hex');
+ return [
+  'import pathlib,base64,types,sys,json',
+  "support=types.ModuleType('private_files');sys.modules['private_files']=support",
+  `exec(base64.b64decode(${JSON.stringify(files['private_files.py'].toString('base64'))}),support.__dict__)`,
+  `root=pathlib.Path.home()/'.local/share/orca-parallel-download'/"runtime-${revision}"`,
+  'directory=support.PrivateDirectory(str(root))',
+  'try:',
+  ' with directory.lock(".install.lock"):',
+  ...Object.entries(files).flatMap(([name,bytes])=>[
+   `  name=${JSON.stringify(name)};content=base64.b64decode(${JSON.stringify(bytes.toString('base64'))})`,
+   '  existing,version=directory.read(name)',
+   "  if existing is not None and existing!=content: raise ValueError('Reader installation changed')",
+   '  if existing is None: directory.replace(name,content,version)'
+  ]),
+  'finally: directory.close()',
+  "m=types.ModuleType('download_reader');m.__file__=str(root/'remote-reader.py')",
+  `exec(base64.b64decode(${JSON.stringify(files['remote-reader.py'].toString('base64'))}),m.__dict__)`
+ ].join('\n');
+}
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const {privateDirectory,privatePath}=require('./local-state.cjs');
 const {validRemote,rootsFrom,contains}=require('./projects.cjs');
@@ -44,15 +69,9 @@ class SshTransport {
     if(this.runtime.platform==='darwin'){privatePath(key);const pub=fs.lstatSync(key+'.pub');if(!pub.isFile()||pub.uid!==process.getuid()||pub.nlink!==1)throw new ToolkitError('Invalid task public key.');}
     const publicKey = fs.readFileSync(key + '.pub', 'utf8').trim();
     if(!/^ssh-ed25519 [A-Za-z0-9+/=]+(?: [a-zA-Z0-9:_-]+)?$/.test(publicKey))throw new ToolkitError('Invalid task public key.');
-    const reader = fs.readFileSync(path.join(__dirname, 'remote-reader.py'));
     const request = {id: job.id, source: job.source, publicKey};
     const script = [
-      'import pathlib,base64,importlib.util,json',
-      'root=pathlib.Path.home()/"setup-orca";root.mkdir(exist_ok=True,mode=0o700)',
-      `temp=root/"parallel-download-reader-${job.id}.tmp"`,
-      `temp.write_bytes(base64.b64decode(${JSON.stringify(reader.toString('base64'))}))`,
-      'temp.chmod(0o700);target=root/"parallel-download-reader.py";temp.replace(target)',
-      'spec=importlib.util.spec_from_file_location("download_reader",target);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)',
+      remoteModule(),
       `request=json.loads(base64.b64decode(${JSON.stringify(Buffer.from(JSON.stringify(request)).toString('base64'))}))`,
       `allowed=pathlib.Path(${JSON.stringify(root)}).resolve(strict=True);source=pathlib.Path(request['source']).resolve(strict=True)`,
       "if source!=allowed and allowed not in source.parents: raise ValueError('Source outside project')",
@@ -132,7 +151,7 @@ class SshTransport {
     });
   }
   async cleanup(job) {
-    try{const result=await this.execute(this.runtime.ssh, [...this.arguments(job), 'done'], {env:this.runtime.childEnv,windowsHide: true, timeout: 20000});if(result.stdout.trim()!=='KEY_REMOVED')throw Error();}
+    try{const result=await this.execute(this.runtime.ssh, [...this.arguments(job), 'done'], {env:this.runtime.childEnv,windowsHide: true, timeout: 20000});if(result.stdout.trim()!=='KEY_REMOVED:'+job.id)throw Error();}
     catch{await this.cleanupViaOrca(job);}
     const directory = this.directory(job);
     for (const name of ['key', 'key.pub', 'known_hosts']) fs.rmSync(path.join(directory, name), {force: true});
@@ -140,17 +159,13 @@ class SshTransport {
   }
   async cleanupViaOrca(job) {
     if(!/^[a-f0-9]{32}$/.test(job.id))throw new ToolkitError('Invalid transfer ID');
+    const nonce=crypto.randomBytes(16).toString('hex');
+    const receipt='ORCA_DOWNLOAD_CLEANED='+job.id+':'+nonce;
     const script=[
-      'from pathlib import Path',
-      `tag="orca-download:${job.id}"`,
-      'keys=Path.home()/".ssh/authorized_keys"',
-      'if keys.exists():',
-      ' lines=keys.read_text().splitlines(keepends=True)',
-      ` temp=keys.with_suffix(".cleanup-${job.id}")`,
-      ' temp.write_text("".join(line for line in lines if tag not in line))',
-      ' temp.chmod(0o600);temp.replace(keys)',
-      `(Path.home()/".local/share/orca-parallel-download/jobs/${job.id}.json").unlink(missing_ok=True)`,
-      `print("ORCA_DOWNLOAD_CLEANED=${job.id}",flush=True)`
+      remoteModule(),
+      `result=m.cleanup(${JSON.stringify(job.id)})`,
+      `if result!=${JSON.stringify('KEY_REMOVED:'+job.id)}: raise ValueError('Cleanup not confirmed')`,
+      `print(${JSON.stringify(receipt)},flush=True)`
     ].join('\n');
     const payload=zlib.deflateSync(Buffer.from(script)).toString('base64');
     const command=`python3 -c 'import base64,zlib;exec(zlib.decompress(base64.b64decode("${payload}")))'`;
@@ -164,10 +179,10 @@ class SshTransport {
       for(let i=0;i<20;i++){
         await this.wait(1000);
         const output=await this.orca(['terminal','read','--terminal',handle,'--limit','10']);
-        if(output.terminal?.tail?.includes('ORCA_DOWNLOAD_CLEANED='+job.id))return;
+        if(output.terminal?.tail?.includes(receipt))return;
       }
       throw new ToolkitError('Cleanup timed out. Retry when Orca is connected.');
     }finally{if(handle)await this.orca(['terminal','close','--terminal',handle]).catch(()=>{});}
   }
 }
-module.exports = {SshTransport};
+module.exports = {SshTransport,remoteModule};

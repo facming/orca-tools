@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-05 — macOS 发布安全加固阶段 7B-1（Draft / BLOCKED）
+
+- H-01：MCP 默认拒绝所有 HTTP redirect，HTTP 错误不回显请求头/远端响应内容；原默认 opener 泄漏已复现，双回环服务 160 个攻击组合及 Bridge 回归通过。
+- H-02：修复 macOS 固定 tmp 链接覆盖；POSIX descriptor helper、私有权限、独占随机临时文件、共同锁和读取版本检测；损坏及外部修改报告错误，Windows 设置路径保留。
+- H-03：下载授权注册、SSH done、Orca fallback 统一锁协议；完整行归属、版本化 reader、安全临时文件、可重试 tombstone 和绑定任务/nonce 的确认；失败保留本机私钥。旧 reader/任务须人工维护，不能混跑。
+- 原三项漏洞均有合成复现。Node 98 项中 97 通过/1 跳过，Bridge 301 项中 298 通过/3 跳过，Remote Reader 原回归及 13 项安全测试通过，APFS 并发压力 100 轮通过。
+- **H-02/H-03 最终 check→rename 非合作写入竞态仍可复现，限制复现程序 exit 1；两个 HIGH 保持阻塞，不宣称修复完成或允许发布。** Python/native 边界仍待独立审查，实际 Linux/VPS/Windows 和 Mac 引擎验收未进行。详见 `docs/macos-release-readiness-audit.md`。
+
 ## 2026-11-05 — macOS Unity 阶段 5C
 
 - 新增独立 Unity adapter、固定白名单 Editor API 扩展、四引擎 Toolkit 状态与安装打包；保留 Unity MCP 名称及 native 任务/下载协议。

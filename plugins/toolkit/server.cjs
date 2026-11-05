@@ -2,10 +2,10 @@
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),crypto=require('node:crypto');
 const {ToolkitError,publicMessage}=require('./platform/errors.cjs');
 const {Controller}=require('./controller.cjs');
-const preferences=require('./download-preferences.cjs');
 const {RemoteBrowser,validRemote}=require('./remote-browser.cjs');
 const {GpuAdmin}=require('./gpu-admin.cjs'),{compose}=require('./compose-ui.cjs');
 async function startServer(options){
+ const preferences=require('./download-preferences.cjs').forPlatform(options.runtime.platform);
  const dataDir=options.dataDir??options.runtime.configDir;
  const controller=new Controller({...options,dataDir});await controller.initialize();const token=crypto.randomBytes(32).toString('hex');let port;
  const picker=options.directoryPicker||{choose:initial=>options.runtime.chooseDirectory(initial),close:()=>options.runtime.closePicker?.()};

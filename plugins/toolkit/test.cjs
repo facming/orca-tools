@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {startServer}=require('./server.cjs'),{Controller}=require('./controller.cjs'),settings=require('./settings.cjs');
-function fixture(){const root=fs.mkdtempSync(path.join(os.tmpdir(),'orca-toolkit-'));const runtime={local:root,downloadsDir:path.join(root,'OrcaParallelDownloads'),home:root,cli:'unused',childEnv:{}};
+function fixture(){const root=fs.mkdtempSync(path.join(os.tmpdir(),'orca-toolkit-'));const runtime={platform:'win32',local:root,downloadsDir:path.join(root,'OrcaParallelDownloads'),home:root,cli:'unused',childEnv:{}};
  const fake={rows:[],closed:0,jobs:new Map(),list(){return [...this.rows];},async close(){this.closed++;},async pauseAll(){this.paused=true;},async create(v){this.rows.push({id:'a',...v});return this.rows.at(-1);},async action(id,action){return {id,action};}};
  const options={dataDir:path.join(root,'OrcaTools'),runtime,port:0,createDownloads:()=>fake,gpu:{async status(){return {online:true};},async open(){return {url:'http://127.0.0.1:18773/',ready:true};}},accounts:{async open(v){return {opened:true,environment:v.environment};}}};
  return {root,options,fake,clean:()=>fs.rmSync(root,{recursive:true,force:true})};}
