@@ -132,6 +132,10 @@ def health(bridge, process):
     result = {'platform': 'darwin', 'capability': 'comfyui', 'ready': all(checks.values()), 'checks': checks, **process.backend}
     api_healthy = all(v for k, v in checks.items() if k != 'comfyui')
     result['godot'] = bridge.native.status(api_healthy) if bridge.native else {'state': 'unsupported', 'checks': {}}
+    result['blender'] = {'state': 'unsupported', 'checks': {}}
+    for engine in result['godot'].pop('engines', []):
+        result[engine['engine']] = engine
+    result['comfyui'] = {'state': 'running' if result['ready'] else 'installed' if checks['installed'] else 'error', 'checks': checks}
     return result
 
 
@@ -161,7 +165,7 @@ def start_admin(bridge, process, port=18773, security=None):
                 return self.reply(403, {'error': 'Access denied.'})
             if self.command == 'GET' and self.path == '/':
                 html = '''<!doctype html><meta charset="utf-8"><title>GPU Workflows</title>
-<h1>ComfyUI Bridge</h1><p>ComfyUI and explicitly configured Godot are managed independently. Godot project execution requires user authorization; it is not sandboxed. Custom ComfyUI nodes and API nodes are disabled.</p>
+<h1>ComfyUI Bridge</h1><p>ComfyUI, Blender and explicitly configured Godot are managed independently. Godot project execution requires user authorization; it is not sandboxed. Custom ComfyUI nodes and API nodes are disabled.</p>
 <button id="refresh">Refresh</button><button id="start">Start ComfyUI</button><button id="stop">Stop managed ComfyUI</button><pre id="state"></pre>
 <script nonce="''' + session + '''">const token="''' + session + '''";
 async function show(action){const r=await fetch('/api/'+action,{method:['start','stop'].includes(action)?'POST':'GET',headers:{'X-Admin-Token':token,'Content-Type':'application/json'},body:['start','stop'].includes(action)?'{}':undefined});document.getElementById('state').textContent=JSON.stringify(await r.json(),null,2);}

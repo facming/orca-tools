@@ -11,10 +11,15 @@ bpy.context.preferences.use_preferences_save=False
 settings=json.loads(pathlib.Path(sys.argv[sys.argv.index('--')+1]).read_text(encoding='utf-8'))
 root=pathlib.Path(settings['project']).resolve();spool=pathlib.Path(settings['spool']);out=pathlib.Path(settings['outputs']).resolve()
 spool.mkdir(parents=True,exist_ok=True);out.mkdir(parents=True,exist_ok=True)
+if settings.get('macos'):
+    bpy.context.preferences.filepaths.save_version=0
+    bpy.context.preferences.filepaths.use_auto_save_temporary_files=False
 
 def local_file(value,suffixes):
     if not isinstance(value,str) or '\\' in value or ':' in value or value.startswith('/') or any(p in ('..','.','') for p in value.split('/')):raise ValueError('Invalid project-relative file')
-    p=(root/value).resolve()
+    candidate=root/value
+    if globals().get('settings',{}).get('macos') and any(p.is_symlink() for p in (candidate,*candidate.parents)):raise ValueError('Symbolic links are not allowed')
+    p=candidate.resolve()
     if not p.is_relative_to(root) or p.suffix.lower() not in suffixes:raise ValueError('File is outside the approved project')
     return p
 def vec(value):
@@ -23,7 +28,7 @@ def vec(value):
 def object_info(obj):return {'name':obj.name,'type':obj.type,'location':list(obj.location),'rotation':list(obj.rotation_euler),'scale':list(obj.scale)}
 def execute(command,args,job_id):
     if command=='batch':
-        results=[];artifacts=[]
+        results=[];artifacts=[];exports=[]
         for index,step in enumerate(args['steps']):
             progress={'completed':index,'total':len(args['steps']),'operation':step['operation']}
             temp=spool/(job_id+'.progress.tmp');temp.write_text(json.dumps(progress),encoding='utf-8');temp.replace(spool/(job_id+'.progress.json'))
@@ -31,13 +36,13 @@ def execute(command,args,job_id):
                 value=execute(step['operation'],step.get('arguments',{}),job_id+'-'+str(index))
                 failed=value.get('executed') is False
                 results.append({'index':index,'operation':step['operation'],'status':'failed' if failed else 'succeeded','result':value})
-                artifacts.extend(value.get('artifacts',[]))
+                artifacts.extend(value.get('artifacts',[]));exports.extend(value.get('_exports',[]))
                 if value.get('artifact'):artifacts.append(value['artifact'])
                 if failed and not args.get('continue_on_error',False):break
             except Exception as error:
                 results.append({'index':index,'operation':step['operation'],'status':'failed','diagnostic':diagnostic(error,root)})
                 if not args.get('continue_on_error',False):break
-        return {'steps':safe_result(results),'completed':len(results),'total':len(args['steps']),'partial_success':any(x['status']=='failed' for x in results),'artifacts':artifacts}
+        return {'steps':safe_result(results),'completed':len(results),'total':len(args['steps']),'partial_success':any(x['status']=='failed' for x in results),'artifacts':artifacts,**({'_exports':exports} if globals().get('settings',{}).get('macos') else {})}
     if command=='viewport_capture':
         target=out/(job_id+'.png');scene=bpy.context.scene
         previous=(scene.render.filepath,scene.render.resolution_x,scene.render.resolution_y,scene.render.resolution_percentage,scene.render.image_settings.file_format)
@@ -79,8 +84,9 @@ def execute(command,args,job_id):
     if command=='save':
         file=local_file(args['path'],{'.blend'});file.parent.mkdir(parents=True,exist_ok=True)
         if file.exists() and not args.get('replace',False):raise ValueError('File exists; explicit replace is required')
-        bpy.ops.wm.save_as_mainfile(filepath=str(file),check_existing=False)
-        return {'saved':args['path']}
+        target=out/(job_id+'.blend') if settings.get('macos') else file
+        bpy.ops.wm.save_as_mainfile(filepath=str(target),check_existing=False)
+        return {'saved':args['path'],**({'artifact':target.name,'_exports':[{'path':args['path'],'artifact':target.name}]} if settings.get('macos') else {})}
     if command=='create_primitive':
         kinds={'cube':bpy.ops.mesh.primitive_cube_add,'sphere':bpy.ops.mesh.primitive_uv_sphere_add,'plane':bpy.ops.mesh.primitive_plane_add,'cylinder':bpy.ops.mesh.primitive_cylinder_add,'cone':bpy.ops.mesh.primitive_cone_add,'torus':bpy.ops.mesh.primitive_torus_add,'monkey':bpy.ops.mesh.primitive_monkey_add}
         if args.get('kind') not in kinds:raise ValueError('Unsupported primitive')
@@ -124,18 +130,29 @@ def execute(command,args,job_id):
                 except TypeError:continue
             else:raise ValueError('Eevee is unavailable')
         if engine=='cycles':
-            preferences=bpy.context.preferences.addons['cycles'].preferences;preferences.compute_device_type='OPTIX';preferences.get_devices()
-            devices=[d for d in preferences.devices if d.type=='OPTIX']
-            if not devices:raise ValueError('Hardware rendering is unavailable')
-            for device in preferences.devices:device.use=device.type=='OPTIX'
-            scene.cycles.device='GPU';scene.cycles.samples=int(args.get('samples',32))
+            if settings.get('macos'):
+                from native_blender_metal import configure
+                device_status=configure(bpy,settings.get('device','metal'))
+                scene.cycles.samples=int(args.get('samples',32))
+            else:
+                preferences=bpy.context.preferences.addons['cycles'].preferences;preferences.compute_device_type='OPTIX';preferences.get_devices()
+                devices=[d for d in preferences.devices if d.type=='OPTIX']
+                if not devices:raise ValueError('Hardware rendering is unavailable')
+                for device in preferences.devices:device.use=device.type=='OPTIX'
+                scene.cycles.device='GPU';scene.cycles.samples=int(args.get('samples',32))
         scene.render.resolution_x=int(args.get('width',1280));scene.render.resolution_y=int(args.get('height',720));scene.render.resolution_percentage=100
         # Compositor outputs may target arbitrary files in an opened .blend. Disable them.
         scene.render.use_compositing=False;scene.render.image_settings.file_format='PNG';scene.render.filepath=str(out/(job_id+'.png'))
+        if settings.get('macos'):
+            from native_blender_metal import render
+            render(bpy,device_status)
+            return {'artifact':job_id+'.png','hardware_render':device_status['backend']=='METAL','render_device':device_status}
         bpy.ops.render.render(write_still=True);return {'artifact':job_id+'.png','hardware_render':True}
     if command=='import_asset':
         file=local_file(args['path'],{'.glb','.gltf','.obj','.ply','.stl','.vrm'})
-        if file.suffix.lower()=='.vrm':vrm_operate(file)
+        if file.suffix.lower()=='.vrm':
+            if settings.get('macos') and not vrm_capabilities()['vrm_import']:raise NotImplementedError('unsupported: VRM extension is unavailable in this managed session.')
+            vrm_operate(file)
         elif file.suffix.lower() in ('.glb','.gltf'):bpy.ops.import_scene.gltf(filepath=str(file))
         elif file.suffix.lower()=='.obj':bpy.ops.wm.obj_import(filepath=str(file))
         elif file.suffix.lower()=='.ply':bpy.ops.wm.ply_import(filepath=str(file))
@@ -144,10 +161,13 @@ def execute(command,args,job_id):
     if command=='export_asset':
         file=local_file(args['path'],{'.glb','.obj','.vrm'});file.parent.mkdir(parents=True,exist_ok=True)
         if file.exists() and not args.get('replace',False):raise ValueError('File exists; explicit replace is required')
-        if file.suffix.lower()=='.vrm':vrm_operate(file,export=True)
+        if settings.get('macos'):file=out/(job_id+file.suffix.lower())
+        if file.suffix.lower()=='.vrm':
+            if settings.get('macos') and not vrm_capabilities()['vrm_export']:raise NotImplementedError('unsupported: VRM extension is unavailable in this managed session.')
+            vrm_operate(file,export=True)
         elif file.suffix.lower()=='.glb':bpy.ops.export_scene.gltf(filepath=str(file),export_format='GLB',export_yup=True)
-        else:bpy.ops.wm.obj_export(filepath=str(file))
-        return {'exported':args['path']}
+        else:bpy.ops.wm.obj_export(filepath=str(file),**({'export_materials':False} if settings.get('macos') else {}))
+        return {'exported':args['path'],**({'artifact':file.name,'_exports':[{'path':args['path'],'artifact':file.name}]} if settings.get('macos') else {})}
     raise ValueError('Operation is not exposed')
 
 def service():
@@ -158,7 +178,7 @@ def service():
             result={'ok':True,'result':execute(request['command'],request.get('arguments',{}),job_id)}
         except Exception as error:
             # Raw exceptions stay in the local app log, not in the remote response.
-            import traceback;traceback.print_exc();result={'ok':False,'error':'Blender operation failed.','diagnostic':diagnostic(error,root)}
+            import traceback;traceback.print_exc();result={'ok':False,'error':'Blender operation failed.','diagnostic':diagnostic(error,root),**({'code':'unsupported'} if isinstance(error,NotImplementedError) else {})}
         target=spool/(job_id+'.response.json');temp=target.with_suffix('.tmp');temp.write_text(json.dumps(result),encoding='utf-8');temp.replace(target)
     return 0.1
 

@@ -87,3 +87,14 @@ test('Toolkit status and panel expose distinct Godot capability without native w
  assert.equal(result.modules.gpu.godot.state,'installed');assert.equal(result.modules.gpu.status,'ready');
  assert.match(html,/godot-state/);assert.match(html,/not sandboxed/);
 });
+test('Blender status is independent and every availability check must pass',async t=>{
+ const f=fixture(t),state=await manager(t,f),gpu=new Gpu(f.runtime);
+ const names=['installed','path','permissions','version','architecture','bridge_api'];
+ state.value.blender={state:'available',checks:Object.fromEntries(names.map(k=>[k,true]))};
+ state.value.godot={state:'error'};state.value.ready=false;state.value.checks.comfyui=false;
+ let status=await gpu.status();assert.equal(status.blender.state,'available');assert.equal(status.godot.state,'error');assert.equal(status.comfyui.state,'installed');
+ for(const key of names){state.value.blender.checks[key]=false;assert.equal((await gpu.status()).blender.state,'error');state.value.blender.checks[key]=true;}
+ for(const value of ['installed','running','unsupported','error']){state.value.blender.state=value;assert.equal((await gpu.status()).blender.state,value);}
+ state.value.blender.state='available';state.value.platform='win32';assert.equal((await gpu.status()).blender.state,'error');
+ assert.match(compose('overview','darwin'),/blender-state/);
+});

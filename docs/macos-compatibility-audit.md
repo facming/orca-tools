@@ -489,3 +489,49 @@ python3 scripts/check.py
 全部使用内存 MCP、临时合成项目、Mock worker/Popen 和回环测试服务。没有启动真实 Godot、执行用户脚本、连接真实 VPS、读取真实 Token 或改变系统权限。此修复不构成真实 Mac/Windows 验收，先前记录的沙箱、进程组及实机验证限制继续存在。
 
 最终结果：MCP schema/兼容性专项 **5/5 通过**；Godot 专项 **32/32 通过**；全部 Python Bridge **234 项，231 通过、0 失败、3 Windows 专属跳过**；全部 Toolkit Node **80 项，79 通过、0 失败、1 Windows 原生探针跳过**。`git diff --check` 和 `scripts/check.py`（173 个源码/文档文件）通过。原 malformed workflow 夹具日志属于预期异常，不表示测试失败；Windows 跳过项不计为实机通过。
+
+## 18. 阶段 5B Blender 审计与复用清单（2026-11-05）
+
+工作区起始干净；fetch 后 PR #6 和 origin/feature/macos-godot 均为 `f09aa4d8ca128a8ebdc172017c4ac22fedea5b8f`，已验证任务指定 `87841d18…` 为祖先。新分支基于实际最新 HEAD，保留 Godot 显式授权修复。
+
+| 文件 | 可复用内容 | 平台处理 |
+| --- | --- | --- |
+| native_blender.py | 场景/几何体/变换/材质/摄像机、bpy 脚本、GLB/OBJ/VRM、viewport、batch/progress | 原 OptiX 分支留给 Windows；Mac 走 Cycles Metal/CPU 和新文件暂存发布 |
+| native_control.py | BLENDER_FIELDS 和参数验证、MCP 信封及结果形状 | 参数验证抽到 native_blender_validation.py；Windows 原进程、防火墙、同步策略保留 |
+| native_process.py | 进程所有权设计原则 | ctypes、Windows Job Objects、防火墙、窗口恢复全部 Windows 专属，Mac 不导入 |
+| bridge.py | 请求鉴权、RuntimeSecurity、native HTTP 路由入口 | 原入口不改，由 macOS 独立 dispatcher 路由引擎 |
+| bridge_platform/macos.py | 私有目录/文件、Token、Tailscale 与 ComfyUI 管理 | 只替换 native factory；ComfyUI 安全实现不变 |
+| bridge_platform/macos_godot.py | canonical、相对路径、目录描述符读取、PNG、任务持久化/取消 | 默认 Godot 行为不变；可执行元数据检查增加 engine 参数，存储名由类属性确定 |
+| plugin/client.py | Blender MCP、任务等待、下载 | 增加可选 boolean authorized 并原样转发；Mac 后端独立强制 Python 授权 |
+| 新 macos_blender.py / macos_native.py | — | Blender 自有会话/任务目录，按引擎和 task ID 分发；不接管外部或历史 PID |
+
+保留 Windows worker 的 OptiX 和原 VRM helper；共享验证提取无业务规则删减。Mac 只新增自己的更严格路径/输出/授权限制。Godot 原“拒绝 Blender 配置”测试更新为拒绝未知引擎、相对路径和无效设备，不放松 Godot 授权。Windows 安装清单补齐抽取模块与原 worker 输出依赖。
+
+自动验证使用 Mock Popen/run/killpg、合成 arm64 Mach-O/PNG/资产、临时项目、合成 bpy/Metal 和回环 MCP HTTP。覆盖发现、版本/权限/架构、项目与脚本授权、路径与链接、启动环境、连续场景会话、几何体/材质/摄像机/灯光脚本、GLB/OBJ/VRM、Cycles 参数、Metal 枚举/无设备/异常/CPU 回退、超时/取消、重启未知、排他发布、SHA-256 防篡改、MCP、面板独立性及 Windows OptiX 分支。
+
+Mock Metal 只验证控制流和返回值，**不是真实 Metal GPU 验收**。未启动真实 Blender/Godot/ComfyUI、修改用户项目/Preferences、下载模型/扩展/GPU 依赖、部署或请求系统权限。详细限制与本地配置见实施文档第 10 节。
+
+人工验收待 ChatGPT 审查、人工批准后执行：选定真实 Blender 版本和专用项目副本；验证 GUI/viewport、连续操作、GLB/OBJ 回读及 VRM 扩展；分别验证真实 Metal 设备、CPU 模式、设备故障和长渲染超时；检查 Preferences 未变、外部 Blender 未受影响、Godot/ComfyUI 独立；验证真实 TCC/Gatekeeper、信号、Bridge/VPS 链路。不得把本轮 Mock 结果描述为已完成这些项目。
+
+### 阶段 5B 最终验证
+
+| 检查 | 结果 |
+| --- | --- |
+| Blender 专项（原有 + 新增 Mock） | 39 通过；其中新增 30 项 |
+| 全部 Python Bridge | 264 项，261 通过，0 失败，3 Windows 专属跳过 |
+| Godot / ComfyUI / macOS 安全专项回归 | 101 通过 |
+| 全部 Toolkit Node | 81 项，80 通过，0 失败，1 Windows 原生探针跳过 |
+| git diff --check | 通过 |
+| python3 scripts/check.py | 178 个源码/文档文件通过 |
+| 敏感信息检查 | 21 个变更/新增文件未发现真实凭据、本机用户目录或非夹具 IP；只出现合成 loopback/文档地址 |
+
+```sh
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*blender*.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+PYTHONPATH=services/local-gpu-bridge python3 -m unittest test_macos_godot test_godot_mcp_schema test_macos_bridge test_macos_security test_macos_security_edges test_comfy_startup test_comfy_history
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+git diff --check
+python3 scripts/check.py
+```
+
+共享 worker 合成测试直接执行真实业务函数而非只匹配源码；macOS 安装文件在临时目录用宿主 Python `-I` 验证可导入且不加载 Windows native_process/native_control。native_process.py、bridge.py、两份阶段 4 安全测试保持基线逐字不变。全部 Python 套件包含原 Windows 逻辑测试，跳过项不计作 Windows 实机通过。既有 malformed workflow 夹具的预期异常日志不表示失败。
