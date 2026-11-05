@@ -381,6 +381,9 @@ def make_handler(bridge, security=None):
                     with bridge.adapters[job['kind']].artifact(job['artifacts'][index]) as source:
                         size = int(source.headers.get('Content-Length', '-1'))
                         if size < 0 or size > bridge.config.get('max_artifact_bytes', 2*1024**3): raise ValueError('Artifact has an invalid or excessive size.')
+                        if security and security.revoked.is_set():
+                            self.close_connection = True
+                            return
                         self.reply_started = True
                         self.send_response(200); self.send_header('Content-Type', 'application/octet-stream'); self.send_header('Content-Length', str(size))
                         self.send_header('Cache-Control', 'no-store'); self.send_header('X-Content-Type-Options', 'nosniff'); self.end_headers()
@@ -390,6 +393,10 @@ def make_handler(bridge, security=None):
                                 self.close_connection = True
                                 return
                             chunk = source.read(min(left, 1024*1024))
+                            # A slow backend read may complete after revocation.
+                            if security and security.revoked.is_set():
+                                self.close_connection = True
+                                return
                             if not chunk: raise ValueError('Artifact download was interrupted.')
                             self.wfile.write(chunk); left -= len(chunk)
                     return

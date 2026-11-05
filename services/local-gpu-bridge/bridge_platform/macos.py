@@ -152,16 +152,18 @@ class MacOSPlatform(Platform):
             # Self metadata alone is insufficient: require the address on a
             # local tunnel interface before binding, and on every later check.
             interfaces = self.run(['/sbin/ifconfig', '-a'], capture_output=True, text=True, timeout=4, check=True)
-            interface = None
-            local = False
+            interface, flags = None, 0
+            owners = []
             for line in interfaces.stdout.splitlines():
-                header = re.match(r'^(\w+):', line)
-                if header:
-                    interface = header[1]
+                header = re.match(r'^(\w+):\s+flags=([0-9a-fA-F]+)', line)
+                if line and not line[0].isspace():
+                    interface, flags = (header[1], int(header[2], 16)) if header else (None, 0)
                 address = re.match(r'\s+inet\s+(\S+)', line)
-                if interface and re.fullmatch(r'utun\d+', interface) and address and address[1] == config['listen']:
-                    local = True
-            if not local:
+                if address and address[1] == config['listen']:
+                    owners.append((interface, flags))
+            # IFF_UP (1) and IFF_RUNNING (0x40); reject stale/down tunnels and
+            # duplicate addresses on another interface, including a LAN NIC.
+            if len(owners) != 1 or not owners[0][0] or not re.fullmatch(r'utun\d+', owners[0][0]) or owners[0][1] & 0x41 != 0x41:
                 raise ValueError()
             return status
         except Exception:
@@ -243,30 +245,39 @@ class ComfyProcess:
         self.stopping = threading.Event()
         self.closed = threading.Event()
         self.backend = {'backend': 'unchecked', 'cpu_fallback': False}
+        self.on_security_failure = lambda: None
 
     def verify_listener(self, required=True):
         """Inspect the actual port before sending HTTP; never adopt another PID."""
-        if not self.process or self.process.poll() is not None:
-            return False
+        # The monitor must keep checking Tailscale while Start owns the lock
+        # for its dependency probe/startup loop. Start checks its own listener.
+        if not self.lock.acquire(blocking=required):
+            return True  # Monitor-only skip, never used to authorize HTTP.
         try:
-            result = self.platform.run(['/usr/sbin/lsof', '-nP', '-iTCP:8188', '-sTCP:LISTEN', '-Fpn'],
-                                       capture_output=True, text=True, timeout=4)
-            if result.returncode == 1 and not result.stdout:
-                return not required  # Child may still be loading; no HTTP yet.
-            if result.returncode != 0:
-                raise ValueError()
-            pid, listeners = None, []
-            for line in result.stdout.splitlines():
-                if line.startswith('p'):
-                    pid = line[1:]
-                elif line.startswith('n'):
-                    listeners.append((pid, line[1:]))
-            if not listeners or any(item != (str(self.process.pid), '127.0.0.1:8188') for item in listeners):
-                raise ValueError()
-            return True
-        except Exception:
-            self.stop()
-            raise ValueError('ComfyUI listener ownership or loopback binding could not be verified.') from None
+            if not self.process or self.process.poll() is not None:
+                return False
+            try:
+                result = self.platform.run(['/usr/sbin/lsof', '-nP', '-iTCP:8188', '-sTCP:LISTEN', '-Fpn'],
+                                           capture_output=True, text=True, timeout=4)
+                if result.returncode == 1 and not result.stdout:
+                    return not required  # Child may still be loading; no HTTP yet.
+                if result.returncode != 0:
+                    raise ValueError()
+                pid, listeners = None, []
+                for line in result.stdout.splitlines():
+                    if line.startswith('p'):
+                        pid = line[1:]
+                    elif line.startswith('n'):
+                        listeners.append((pid, line[1:]))
+                if not listeners or any(item != (str(self.process.pid), '127.0.0.1:8188') for item in listeners):
+                    raise ValueError()
+                return True
+            except Exception:
+                self.on_security_failure()
+                self.stop()
+                raise ValueError('ComfyUI listener ownership or loopback binding could not be verified.') from None
+        finally:
+            self.lock.release()
 
     def start(self, timeout=300):
         from comfy_startup import launch_spec, healthy
@@ -287,6 +298,10 @@ class ComfyProcess:
                     raise ValueError('ComfyUI port belongs to an external instance; no process was started.')
             validate_comfy(cwd)
             self.backend = probe_python(command[0])
+            # stop(final=True) can arrive while the bounded dependency probe
+            # holds this lock. Never spawn a child after that stop request.
+            if self.closed.is_set() or self.stopping.is_set():
+                raise ValueError('ComfyUI startup was stopped.')
             command += ['--disable-all-custom-nodes', '--disable-api-nodes', '--disable-auto-launch']
             if self.backend['cpu_fallback']:
                 command.append('--cpu')

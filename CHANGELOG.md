@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-05 — PR #5 安全边界追加修复
+
+- 对已有网络安全修复复核：Tailscale 目标地址须唯一且位于 UP/RUNNING 的 utun，拒绝停用/重复接口；ComfyUI listener 检查与启停串行化，后台网络监测不被启动锁阻塞。
+- ComfyUI listener 异常先撤销远程访问再等待进程停止；停止发生在依赖探针期间时不再启动新子进程；清理异常仍继续停止受管 ComfyUI。
+- 本地管理请求在网络检查、慢请求体读取后重验安全状态和 Bearer；session 不绕过配置/Token 权限失败。产物流打开或读取期间发生撤销时不再发送成功头或新读出的数据。
+- 卸载在 launchctl 操作前后核对托管 plist/launcher 的完整内容和文件身份；文件被替换时保留文件并拒绝删除，继续保留用户数据。
+- 新增 12 项 Mock 边界测试；全部 Python Bridge 197 项（194 通过、3 Windows 专属跳过），Toolkit Node 78 项（77 通过、1 Windows 原生探针跳过）。未访问真实 VPS、启动真实 ComfyUI/GPU、修改 main 或引入 Godot 功能；原 PR #5 保持 Draft。
+
 ## 2026-11-05 — PR #5 macOS Bridge 网络安全修复
 
 - 启动前和绑定后核验 Tailscale Self 与本机 utun 地址；运行期后台监测地址消失/变化、离线、配置变化和探测失败，锁定拒绝并关闭所有服务连接。无监听地址回退；网络恢复后须显式重启并重新校验。

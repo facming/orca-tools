@@ -91,6 +91,11 @@ def uninstall(adapter):
     # Remove service registration only; keep all models, workflows, tokens, jobs and logs.
     require_user()
     adapter.validate_launch_agent()
+    targets = [adapter.plist, adapter.root / 'launcher.json']
+    def identity(file):
+        info = private_path(file).stat()
+        return (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns, info.st_size)
+    approved = [identity(file) for file in targets]
     if adapter.launchctl('status'):
         adapter.launchctl('stop')
     else:
@@ -98,8 +103,11 @@ def uninstall(adapter):
         result = adapter.run(['/bin/launchctl', 'print', 'gui/' + str(os.getuid()) + '/' + LABEL], capture_output=True, timeout=15)
         if result.returncode == 0:
             adapter.launchctl('stop')
-    adapter.plist.unlink()
-    private_path(adapter.root / 'launcher.json').unlink()
+    adapter.validate_launch_agent()
+    if [identity(file) for file in targets] != approved:
+        raise ValueError('Managed service files changed during uninstall; no files were removed.')
+    for file in targets:
+        file.unlink()
 
 
 def main():

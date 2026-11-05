@@ -170,13 +170,23 @@ for(const action of ['start','stop'])document.getElementById(action).onclick=()=
             local = hmac.compare_digest(self.headers.get('X-Admin-Token', '').encode(), session.encode())
             if not (bearer or local):
                 return self.reply(403, {'error': 'Access denied.'})
+            if security and not security.check():
+                return self.reply(403, {'error': 'Access denied.'})
             try:
+                if not local and not hmac.compare_digest(self.headers.get('Authorization', '').encode(), ('Bearer ' + read_token(bridge.platform.root)).encode()):
+                    return self.reply(403, {'error': 'Access denied.'})
                 if self.command == 'GET' and self.path == '/api/health':
                     return self.reply(200, health(bridge, process))
                 if self.command == 'GET' and self.path == '/api/workflows':
                     return self.reply(200, {'workflows': bridge.catalog()})
                 if self.command == 'POST' and self.path in ('/api/start', '/api/stop'):
                     if self.headers.get('Origin') != 'http://' + expected or self.headers.get('Transfer-Encoding') or self.headers.get('Content-Length') != '2' or self.rfile.read(2) != b'{}':
+                        return self.reply(403, {'error': 'Access denied.'})
+                    if security and not security.check():
+                        return self.reply(403, {'error': 'Access denied.'})
+                    # A slow body/network probe may overlap token rotation.
+                    # A valid local session remains independent of Bearer auth.
+                    if not local and not hmac.compare_digest(self.headers.get('Authorization', '').encode(), ('Bearer ' + read_token(bridge.platform.root)).encode()):
                         return self.reply(403, {'error': 'Access denied.'})
                     result = process.start() if self.path == '/api/start' else process.stop()
                     logging.info('Managed ComfyUI lifecycle operation completed')
@@ -216,6 +226,7 @@ def serve(config, adapter, interval=1):
     if not security.check():
         raise ValueError('Bridge startup security checks failed.')
     process = ComfyProcess(config, adapter)
+    process.on_security_failure = security.revoked.set
     from bridge import ComfyAdapter
     bridge = Bridge(config, ManagedAdapter(process, ComfyAdapter(config['comfy_url'])), adapter)
     server = admin = monitor = None
@@ -246,14 +257,22 @@ def serve(config, adapter, interval=1):
     finally:
         security.revoked.set()
         done.set()
-        if server:
-            server.server_close()
-        if admin:
-            admin.shutdown()
-            admin.server_close()
-        if monitor:
-            monitor.join(timeout=10)
-        process.stop(final=True)
+        try:
+            if server:
+                server.server_close()
+        finally:
+            try:
+                if admin:
+                    try:
+                        admin.shutdown()
+                    finally:
+                        admin.server_close()
+            finally:
+                try:
+                    if monitor:
+                        monitor.join(timeout=10)
+                finally:
+                    process.stop(final=True)
 
 
 def main():
