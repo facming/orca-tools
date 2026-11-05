@@ -168,7 +168,7 @@ class GodotTests(unittest.TestCase):
             with self.assertRaises(ValueError): self.control.queue(body)
         self.control.settings['projects'][0]['allow_scripts'] = False
         with self.assertRaises(ValueError): self.control.queue(self.body())
-        for settings in ({'blender_executable': '/mock'}, {'godot_executable': 'relative'}, {'projects': [{'id': '../bad'}]}):
+        for settings in ({'unity_executable': '/mock'}, {'blender_executable': 'relative'}, {'blender_device': 'cuda'}, {'godot_executable': 'relative'}, {'projects': [{'id': '../bad'}]}):
             with self.assertRaises(ValueError): validate_settings(settings)
         self.spawn.assert_not_called()
 

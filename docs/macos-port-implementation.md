@@ -254,3 +254,37 @@ python3 scripts/install-local-gpu-macos.py discover-godot --godot-executable /pa
 截图只读取此任务的输出；脚本 `output_paths` 须显式指定最多 16 个尚不存在的项目相对 PNG 文件，不覆盖/登记已有文件。产物上限 32 MiB、尺寸最大 4096×4096，校验 PNG 签名、块 CRC、IHDR、解压尺寸/过滤字节与完整结束，支持 8-bit RGB/RGBA 非交错 PNG。目录描述符逐层 O_NOFOLLOW 打开，拒绝符号链接、硬链接、非普通文件；复制到私有任务目录并登记大小/SHA-256，下载重新校验并从已验证字节发送。其他格式明确 unsupported。媒体自身可能承载脚本生成的信息，PNG 格式检查不构成内容脱敏沙箱。
 
 Toolkit 面板独立显示 Godot `installed/available/running/unsupported/error`。只有安装、路径、权限、版本、arm64 与 Bridge API 安全健康全部通过才报告 available/running；Bridge 健康仍依赖 LaunchAgent、私有配置/token、Tailscale 和 peer，**不依赖 ComfyUI 运行**。Bridge 不健康时已核验 Godot 只报告 installed；探针错误为 error，未配置/不兼容为 unsupported。ComfyUI 六项 ready 检查保持不变。
+
+## 10. 阶段 5B：Blender macOS 原生适配
+
+基于 PR #6 实际最新 HEAD `f09aa4d8ca128a8ebdc172017c4ac22fedea5b8f` 开发；任务中列出的 `87841d18a2092869bbe90dfe42d9866f7bcb1f2b` 是其祖先。保留最新 Godot MCP 显式授权修复。开发分支 `feature/macos-blender`，Draft PR base 为 `feature/macos-godot`；不改 main、不合并。
+
+### 本地选择与运行
+
+`bridge_platform/macos_blender.py` 的 `discover()` 只读发现 `/Applications`、登录用户 Applications 中的 Blender.app，以及明确指定的 app/binary。发现不会执行或自动选择程序。用户在现有私有配置的 `native.blender_executable` 中填写选定的绝对路径，可选择已有不同版本；`native.blender_device` 为 `metal`（默认）或 `cpu`。现有 `native.projects` 使用 `id/root/enabled/allow_scripts`，Godot 的 `godot_subdir` 不影响 Blender 根目录。配置变化须本地审查后重启 Bridge。
+
+探针验证 canonical 路径、无符号链接、可执行且不可被 group/other 写入的普通文件、含 arm64 的 Mach-O，以及实际 `--version` 返回的稳定 Blender 4.2+（major 4）或 major 5。Intel/Rosetta、预发布、未知主版本返回 unsupported。探针超时/执行异常返回 error。没有自动下载、安装、版本替换、系统驱动修改或额外 GPU 依赖。
+
+Blender 维护独立的每项目 GUI 会话，因此连续的 create/transform/material/render 保留场景。所有进程均由当前实例以参数数组、`shell=False`、新 session 启动，使用 `--factory-startup --disable-autoexec --python-exit-code 1`。HOME/TMPDIR/BLENDER_USER_CONFIG/SCRIPTS/EXTENSIONS 指向私有会话目录，禁用 Preferences 自动保存和自动备份；不改用户原配置，不发现/接管已运行的 Blender。空闲会话保留至 Bridge 退出；每个执行任务默认 300 秒，脚本/batch 的 timeout_seconds 保留 10–7200 秒语义。
+
+### MCP 与文件行为
+
+复用 `blender_operation`、`blender_tasks`、`cancel_blender_task`、`native_job_status`、`wait_native_job`、`fetch_native_artifact`；请求仍为 engine/project_id/operation/arguments/request_id 信封。Blender 操作参数验证抽至共享 `native_blender_validation.py`，Windows 委托该模块并保留自己的路径策略、Job Objects 和防火墙实现。Windows 安装器同步打包共享依赖。
+
+- scene_info、open、save、create_primitive、set_transform、set_material、set_camera、delete_object、import_asset、export_asset、render、execute_code、run_script、viewport_capture、batch 复用原 worker。
+- 灯光通过显式授权的 Python bpy 操作；没有添加与 Windows 冲突的 set_light 参数。rotation 为弧度。viewport_capture 需要 GUI 中实际存在 VIEW_3D。
+- Python（含 batch 内步骤）同时要求本地 allow_scripts=true 和顶层 authorized=true；缺失、false 或非布尔 true 均在排队/启动前拒绝。客户端只转发授权，不自动补 true。普通 typed 操作要求本地 enabled 项目。
+- Mac 当前只开放 Cycles 和 GLB/OBJ/VRM 资产输入输出；Eevee、其他资产导入格式、replace=true 明确 unsupported。OBJ 导出禁用 MTL sidecar；GLB 含材质。VRM 仅在隔离会话中实际可加载的既有扩展可用时执行，否则任务 error_code=unsupported。普通用户配置下安装的扩展不会自动带入私有会话，也不会自动安装扩展。
+- save/export 写入任务暂存区，再通过逐级目录描述符、O_NOFOLLOW、O_EXCL 发布到已存在的项目父目录。拒绝覆盖、重复输出、路径穿越与符号链接。批处理的发布发生在 worker 返回后；不能在同一批次里 open 尚未发布的新文件。script output_paths 只能登记提交时不存在的文件。
+- 项目 canonical root/device/inode 在提交和执行时重验；输入/产物读取拒绝链接、硬链接、非普通文件，单文件最多 32 MiB。PNG 校验格式/CRC/像素；其他资产是受管任务产生的字节，不宣称完成模型内容安全验证。复制后登记 bytes/SHA-256，下载重新核验。失败 batch 的已登记成功产物仍可下载。
+- 每任务独立 ID、幂等冲突检查、进度、固定日志、取消与超时。脚本结果沿用过滤/大小限制并增加 POSIX 路径、凭据字段脱敏；原应用 stdout/stderr 丢弃。重启未完成任务为 failed + outcome_unknown，不重投、不用历史 PID 发信号。
+
+### Metal 与状态边界
+
+渲染前在当前 Blender 内尝试 Cycles METAL backend 并枚举实际 METAL 设备，只启用匹配设备；不按芯片名字推断能力。选择 CPU 时不枚举 GPU。无 backend、无设备或枚举异常明确返回 CPU fallback；已枚举 Metal 但渲染报错时尝试一次 CPU，CPU 也失败则任务失败。结果保留 artifact/hardware_render，并增加 render_device.backend、metal_available、metal_devices、cpu_fallback、fallback_reason；CPU 主动选择时 metal_available=null（未探测）。渲染卡住由任务超时终止受管进程，不伪造回退成功。
+
+Toolkit 分别显示 ComfyUI/Godot/Blender 状态。Blender available/running 必须通过 installed/path/permissions/version/architecture/bridge_api 全部检查。available 表示原生执行检查通过，**不代表 Metal 已验收**；Metal 按每次 render 检测。ComfyUI 原六项 ready 判断未变；三种引擎的任务、进程、存储异常和退出清理独立。
+
+**没有安全沙箱，也没有 macOS 出站网络隔离。** 授权 Python 仍以登录用户权限运行，可自行访问文件/网络、改变项目或派生进程；路径防护与新文件发布约束 Bridge 自身，无法阻止受信任脚本主动覆盖文件。进程组不等价 Windows Job Objects，脱离 session 的后代或断电/SIGKILL 遗留进程需人工检查。媒体内容不由日志脱敏处理。
+
+实现参考 [Blender 官方命令行文档](https://docs.blender.org/manual/en/4.2/advanced/command_line/arguments.html) 和 [Cycles 官方设备实现](https://github.com/blender/blender/blob/main/intern/cycles/blender/addon/properties.py)。本轮仅 Mock Blender、Mock Metal、临时项目、合成文件和回环 HTTP；真实版本/Metal/GUI、扩展、TCC/Gatekeeper、信号及 VPS 链路均待 ChatGPT 审查后人工授权验收。

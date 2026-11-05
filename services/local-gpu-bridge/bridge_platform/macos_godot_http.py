@@ -20,6 +20,16 @@ def handle_native(handler, bridge, route, security=None):
             if set(value) != {'project_id'}:
                 raise ValueError('Invalid stop fields.')
             return handler.send_json(200, native.stop(value['project_id']))
+        if method == 'POST' and route == '/v1/native/blender-tasks':
+            value = handler.body()
+            if set(value) - {'project_id'}:
+                raise ValueError('Invalid task filter.')
+            return handler.send_json(200, native.blender_tasks(value.get('project_id')))
+        if method == 'POST' and route == '/v1/native/blender-cancel':
+            value = handler.body()
+            if set(value) != {'ident'}:
+                raise ValueError('Invalid cancel fields.')
+            return handler.send_json(200, native.cancel_blender(value['ident']))
         match = re.fullmatch(r'/v1/native/jobs/([a-f0-9]{32})(/(cancel|logs))?', route)
         if match:
             ident, action = match[1], match[3]
@@ -58,4 +68,4 @@ def handle_native(handler, bridge, route, security=None):
         if handler.reply_started:
             handler.close_connection = True
             return
-        return handler.send_json(400, {'error': 'Godot request rejected. Check local approval, paths and task arguments.'})
+        return handler.send_json(400, {'error': 'Native request rejected. Check local approval, paths and task arguments.'})

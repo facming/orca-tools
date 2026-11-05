@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-05 — macOS Blender 阶段 5B
+
+- 新增独立 Blender adapter 与多引擎 native 分发，发现/选择已有 Blender.app 或 arm64 可执行文件；检查稳定版本与执行权限，不自动安装或接管现有进程。
+- 复用场景、材质、几何体、GLB/OBJ、VRM 能力检查、截图、脚本和 batch；Python 要求本地许可与显式 authorized=true。独立任务状态/进度/固定日志、超时/取消、重启结果未知。
+- Cycles 运行时检测 Metal 设备，支持 CPU 配置、Metal 不可用或渲染异常的明确 CPU fallback；隔离配置，不保存用户 Preferences，不下载 GPU 依赖。
+- 项目路径/链接检查，save/export 暂存后排他发布，产物 SHA-256 登记与下载复验；Mac 不支持的参数明确 unsupported。Toolkit 独立显示 ComfyUI/Godot/Blender 状态。
+- 新增 Mock Blender/Metal 与共享 worker 测试，保留 Windows OptiX/Job Objects/防火墙和 Godot/ComfyUI 回归；真实 Metal、GUI、扩展与系统权限仍待人工验收。Mac 脚本不是安全沙箱，进程组不等价 Windows Job Objects。
+- 验证：Blender 专项 39 通过；全部 Python Bridge 264 项（261 通过、3 Windows 专属跳过）；Godot/ComfyUI/安全回归 101 通过；Toolkit Node 81 项（80 通过、1 跳过）；diff/check 和敏感信息扫描通过。
+
 ## 2026-11-05 — PR #6 Godot MCP 显式授权修复
 
 - 将 capture_scene 和 run_project_script 的 authorized 加入 inputSchema.required；godot_operation 原有必填授权不变。MCP 缺少授权字段时在分发前拒绝。

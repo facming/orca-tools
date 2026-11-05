@@ -137,11 +137,8 @@ class MacOSPlatform(Platform):
 
     def native_controls(self, config, save_config):
         if config.get("native"):
-            from .macos_godot import GodotControl, UnavailableGodot
-            try:
-                return GodotControl(config), None
-            except Exception:
-                return UnavailableGodot(), None
+            from .macos_native import NativeControl
+            return NativeControl(config), None
         return None, None
 
     def tailscale(self, config):

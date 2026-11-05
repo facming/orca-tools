@@ -74,18 +74,18 @@ def open_inside(root, value):
         os.close(fd)
 
 
-def executable(value):
+def executable(value, engine="godot"):
     p = canonical(value)
     if p.suffix.lower() == '.app':
         with inside(p, 'Contents/Info.plist').open('rb') as stream:
             meta = plistlib.load(stream)
         name = meta.get('CFBundleExecutable', '')
-        if not re.fullmatch(r'[A-Za-z0-9_.-]+', name) or 'godot' not in meta.get('CFBundleIdentifier', '').lower():
-            raise ValueError('Select a Godot application bundle.')
+        if not re.fullmatch(r'[A-Za-z0-9_.-]+', name) or engine not in meta.get('CFBundleIdentifier', '').lower():
+            raise ValueError('Select a ' + engine.title() + ' application bundle.')
         p = inside(p, 'Contents/MacOS/' + name)
     info = p.stat()
     if not stat.S_ISREG(info.st_mode) or not os.access(p, os.X_OK) or info.st_mode & 0o022:
-        raise ValueError('Godot executable permissions are unsafe.')
+        raise ValueError(engine.title() + ' executable permissions are unsafe.')
     # Inspect Mach-O before executing a user-selected file. Scripts/ELF/PE rejected.
     with p.open('rb') as stream:
         data = stream.read(4096)
@@ -101,7 +101,7 @@ def executable(value):
             raise ValueError('Invalid universal executable.')
         architectures = {struct.unpack_from('>I', data, 8 + i * step)[0] for i in range(count)}
     if 0x0100000c not in architectures:
-        raise Unsupported('Godot requires a native arm64 Mach-O executable; Intel/Rosetta is unsupported.')
+        raise Unsupported(engine.title() + ' requires a native arm64 Mach-O executable; Intel/Rosetta is unsupported.')
     return p
 
 
@@ -129,10 +129,14 @@ def child_env(home):
 
 
 def validate_settings(settings):
-    if not isinstance(settings, dict) or set(settings) - {'godot_executable', 'projects'}:
-        raise ValueError('Only Godot executable and project settings are supported on macOS.')
+    if not isinstance(settings, dict) or set(settings) - {'godot_executable', 'blender_executable', 'blender_device', 'projects'}:
+        raise ValueError('Only native executable, device and project settings are supported on macOS.')
     if settings.get('godot_executable') is not None and (not isinstance(settings['godot_executable'], str) or not Path(settings['godot_executable']).is_absolute()):
         raise ValueError('Godot must be explicitly configured with an absolute path.')
+    if settings.get('blender_device', 'metal') not in ('metal', 'cpu'):
+        raise ValueError('Blender device must be metal or cpu.')
+    if 'blender_executable' in settings and (not isinstance(settings['blender_executable'], str) or not Path(settings['blender_executable']).is_absolute()):
+        raise ValueError('Blender needs an absolute selected path.')
     projects = settings.get('projects', [])
     if not isinstance(projects, list) or len(projects) > 100:
         raise ValueError('Invalid approved projects.')
@@ -192,10 +196,11 @@ def png(data, width=None, height=None):
 
 
 class GodotControl:
+    engine = "godot"
     def __init__(self, config, run=None, popen=None):
         self.settings = config.get('native') or {}
         validate_settings(self.settings)
-        self.root = private_dir(Path(config['data_dir']) / 'godot')
+        self.root = private_dir(Path(config['data_dir']) / self.engine)
         self.run, self.popen = run or subprocess.run, popen or subprocess.Popen
         self.lock = threading.RLock()
         self.jobs, self.active, self.threads = {}, {}, []
