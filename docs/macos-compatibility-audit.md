@@ -167,6 +167,8 @@ Toolkit 1.3.2 改用 `chosenFolder` 接收 alias，并将交互命令分离为�
 node --test --test-name-pattern='^(macOS AppleScript|running macOS|missing, non-executable|profile override|open and folder selection|macOS activation|all views share one shell)' plugins/toolkit/test-macos-directory-picker.cjs plugins/toolkit/test-platform.cjs plugins/toolkit/test-unified-ui.cjs
 ```
 
-用户随后明确批准 `1a5f3ee` 的 1.3.2 更新。已通过 Orca 官方界面确认本地来源、安装并启用，49 个插件文件与该提交一致，实际页面显示 v1.3.2，GPU 管理端口未监听。本地数据目录权限为 0700。已从新版 Downloads 打开真实目录窗口，等待用户点击后复核结果。
+用户随后明确批准 `1a5f3ee` 的 1.3.2 更新。已通过 Orca 官方界面确认本地来源、安装并启用，49 个插件文件与该提交一致，实际页面显示 v1.3.2，GPU 管理端口未监听。本地数据目录权限为 0700。
 
-自动测试未操作原生对话框，不能替代人工点击验收。选中保存、刷新保留与原生取消仍待复验。第 8 节已确认的宿主空闲回收限制未在此次修复中处理。
+**人工配合实机复验通过。** 从新版 Downloads 打开真实系统目录窗口，由用户点击选取含中文及空格的测试目录；页面返回 “Download folder selected.”，刷新后路径保留，生成的目录偏好文件权限为 0600。再次打开窗口并由用户点击取消，等待提示消失、Browse 按钮恢复，原目录不变；再刷新确认仍保留。此前“选中目录即报错”的故障不再出现，选中保存、刷新保留、原生取消三项通过。
+
+上述结果来自用户点击原生对话框及自动化读取页面回执，区别于仅替代对话框的自动测试。TCC 拒绝行为仍未验证。第 8 节已确认的宿主空闲回收限制未在此次修复中处理。
