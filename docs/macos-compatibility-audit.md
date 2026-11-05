@@ -199,3 +199,48 @@ Mac 本地偏好恢复到 `runtime.configDir`。目录 0700、文件 0600，仅�
 **测试与真实验收严格区分。** 本轮没有安装或激活真实 Orca 插件，没有调用真实 `accounts.list` / `accounts.selectClaude`，没有读取真实账号、用量、配对材料、OAuth、Cookie 或 Token，也没有自动使用真实 environment。HTTP 服务只在回环地址与临时配置目录中运行，所有 Accounts 数据来自 `fixtures/accounts.cjs` 的合成 RuntimeClient。没有开放 Downloads 或 GPU。
 
 **仍待验证。** 真实远程配对、权限与 RPC 错误码/回包兼容性、真实用量归属及切换后新建 Claude 会话的账号，须在 ChatGPT 审查和人工授权后单独验收；不宣称真实账号能力已通过实机验证。阶段 1 的宿主空闲 worker 回收及 TCC 拒绝未在本阶段解决，Intel 与 Windows 原生环境未做实机验证。
+
+## 11. 阶段 3 Downloads 实施记录（2026-11-05）
+
+开始时工作区干净。fetch 后 `feature/macos-accounts` 与 origin 一致，最新提交为 `c68b6e5c04deb97311ef07fe5c0ca6eceb353519`。从该提交创建 `feature/macos-downloads`，Draft PR base 为 `feature/macos-accounts`，不修改 main，不合并 PR。
+
+**实现与安全边界。** Mac 使用阶段 1 runtime 的 CLI、SDK、OpenSSH、childEnv 和 downloadsDir，Controller 解除 Downloads preview。缺少 environment 为 needs-setup；依赖检查通过后为 configured，初始化/页面 GET 不构造远程 client、不启动 SSH/keygen；只有明确浏览/下载/恢复/清理操作才访问远程。ready 表示最近一次远程请求成功，错误后为 offline/error，不以本地初始化成功冒充远程连接。
+
+每任务独立 Ed25519 密钥、known_hosts 和 HostKeyAlias；固定 StrictHostKeyChecking=yes，隔离 SSH 用户配置、agent 与全局 known_hosts。Mac 数据/密钥目录 0700，私钥/known_hosts/任务 JSON/partial 0600，拒绝不安全权限与链接。host key 来自既有 Orca 通道，同任务 pin 改变拒绝更新。清理必须确认回执才删除本地密钥，失败保留可重试 Clear access 和更换目标拦截；重启不自动访问 VPS 清理授权。
+
+远程目录以既有 `repo list` 项目根为范围，由 RuntimeClient `files.browseServerDir` 只读浏览。拒绝项目外路径、根目录、点段、控制字符、相似前缀和目录符号链接；逐层确认目录及回包路径。隐藏开关、过滤、200 项分页保留。下载准备的固定脚本在注册前校验真实源路径属于项目，`remote-reader.py` 协议与生产文件未修改，没有增加通用 shell 能力。
+
+引擎保留并行/重试/暂停/继续/完整 SHA-256/独占目标发布，补充持久化分块摘要恢复检查、完整写入、Mac 进程锁和死进程锁恢复。APFS 硬链接发布中断后，仅在 inode 与 SHA-256 均确认属于该任务时恢复完成，不覆盖已有文件。默认 `~/Downloads/Orca`，沿用原生选择器及取消保留设置；权限拒绝与磁盘不足提供固定诊断，完成后的 Open folder 调用 runtime.openPath。Accounts 仍为阶段 2 行为；GPU 仍 unsupported。
+
+| 测试 | 结果与范围 |
+| --- | --- |
+| Downloads 专项 Node | 32 项：31 通过、0 失败、1 跳过。包含下载模块、远程浏览、Windows/Mac 目录选择夹具。 |
+| 全部 Toolkit Node | 72 项：71 通过、0 失败、1 跳过。Accounts、平台 adapter、统一 UI、GPU 原有回归通过。 |
+| Windows | 原有适配夹具、路径/命令参数与模拟 GPU 启动通过；唯一跳过项是需要 Windows Orca/OpenSSH 实机的原生探针，不等于 Windows 实机验收。 |
+| SSH | Mock exec/spawn 验证 Mac/Windows 参数、Ed25519、childEnv、0700/0600、quoted known_hosts 路径、host-key pin 变化拒绝、StrictHostKeyChecking、限定 read、SSH 清理与 Orca fallback、清理失败保留密钥。没有调用真实 ssh/keygen。 |
+| 目录权限 | 合成项目根、Mock RuntimeClient 覆盖初始项目列表、隐藏文件、名称过滤、分页、中文、路径越界、符号链接、回包未确认、非远程 client 与 SDK 错误脱敏。 |
+| 引擎/APFS | 临时目录中使用 24 MiB 合成文件，验证并行上限、进度/速度、重试、暂停/重开/继续、已完成块损坏后的重传、完整 hash 失败、独占目标、元数据/partial 权限、进程锁、磁盘不足后重试。SIGKILL 杀死隔离 Node 子进程后恢复死进程锁和任务，仅 Resume 继续传输；APFS 发布中断用故障注入验证同 inode 恢复。 |
+| 页面与本地操作 | 回环 HTTP + mock manager 验证 needs-setup/configured/ready/offline/error、任务列表、禁止带待清理任务更换环境、缺失 SSH 工具关闭能力、Finder openPath 路由。Node VM 执行生产 Downloads 脚本验证实际任务和连接状态文案；平台测试验证 `/usr/bin/open` 参数。 |
+| 原生目录选择与 TCC | 本轮运行既有非交互 AppleScript/目录选择测试，覆盖中文空格、保存、取消及刷新保留。真实点击验收证据见第 9 节；本阶段未再次请求真实 TCC 授权。TCC 拒绝仅 EPERM/EACCES 模拟，不作为真实权限验收。 |
+| Python reader | 隔离 HOME、合成源文件、公钥和 host public key：register forced-command/restrict、0600 元数据、精确范围、越界/任意命令拒绝、源文件变化拒绝、仅清理本任务授权通过。生产 reader 未修改。 |
+
+执行命令：
+
+```sh
+node --test plugins/toolkit/modules/downloads/test*.cjs plugins/toolkit/test-remote-browser.cjs plugins/toolkit/test-directory-picker.cjs plugins/toolkit/test-macos-directory-picker.cjs
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+python3 plugins/toolkit/modules/downloads/test_remote.py
+git diff --check
+```
+
+**真实 VPS 尚未测试。** 本阶段未安装/激活新插件、读取真实 SSH 私钥/配对材料、生成真实 SSH 密钥、访问真实远程文件或修改 Tailscale/PF/防火墙/TCC。全部下载流量来自 mock，APFS 证据仅为本地临时目录离线测试，不能写成真实传输验收。
+
+**待 ChatGPT 审查及人工批准后的验收步骤：**
+
+1. 通过 Orca 官方 UI 审核并更新插件；人工指定专用测试 environment 和项目，明确授权真实配对、每任务密钥生成及远程临时授权操作。打开页面时确认未配置为 needs-setup，配置后仍明确远程尚未检查，GPU unsupported。
+2. 在专用 Linux 项目中放置合成大文件、中文/空格文件名、隐藏文件和项目外符号链接。验证项目范围、分页/过滤，越界拒绝；若 SDK 缺少符号链接类型或 canonical path 信息，保持失败关闭，记录兼容性问题，不降低校验。
+3. 人工选择 Mac 测试目录，分别验证允许、取消和 TCC 拒绝；确认无需管理员权限、取消不改原目录、错误不泄漏连接信息。
+4. 对合成大文件运行 4/8/12/16 并发，暂停/恢复，断网重试，关闭/重开 Orca 后恢复；独立对比 SHA-256，验证预存同名文件不被覆盖。用完成卡片 Open folder 确认 Finder。
+5. 验证完成/取消/Clear access 后仅移除本任务远程 authorized_keys 条目与元数据；中断清理时保留提示，恢复连接后可重试。真实 host-key 变更只在专用测试服务器安排，必须失败关闭。
+
+**剩余限制。** 真实 SDK/CLI/SSH 回包、项目根与符号链接语义、真实 TCC、长时间大文件与真实网络中断均待授权验收。阶段 1 已确认的 worker 空闲回收仍可能中断传输，需重开管理页并 Resume；不伪造保活。准备阶段若在创建 partial 后、元数据落盘前的极短窗口退出，保留文件并失败关闭，可能需 Clear access 后新建任务。非硬链接文件系统复制回退在发布中断时可能需要人工检查，绝不自动覆盖。PID 复用或不完整锁按占用/异常处理，需要人工确认后修复；不强行移除活进程锁。Intel Mac、Windows 原生和断电耐久性未验收。

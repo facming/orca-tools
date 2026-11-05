@@ -26,10 +26,8 @@ class Semaphore {
     }
   }
 }
-function writeJson(file, value) {
-  fs.writeFileSync(file + '.tmp', JSON.stringify(value, null, 2));
-  fs.renameSync(file + '.tmp', file);
-}
+const {privateDirectory,privatePath,writeJson,acquireLock,localError}=require('./local-state.cjs');
+const {validRemote}=require('./projects.cjs');
 function safeName(source) {
   let name = path.posix.basename(source).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/, '');
   if (!name || /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(name)) name = 'download_' + name;
@@ -45,18 +43,24 @@ class DownloadManager {
     this.options = options; this.root = options.dataDir; this.jobs = new Map(); this.runs = new Map();
     this.live = new Map(); this.slots = new Semaphore(16); this.closed = false;
     this.transport = options.transport || new SshTransport(options);
-    fs.mkdirSync(path.join(this.root, 'jobs'), {recursive: true});
+    this.privateFiles=options.runtime?.platform==='darwin';
+    if(this.privateFiles){privateDirectory(this.root);privateDirectory(path.join(this.root,'jobs'));}
+    else fs.mkdirSync(path.join(this.root, 'jobs'), {recursive: true});
     for (const name of fs.readdirSync(path.join(this.root, 'jobs'))) {
       if (!/^[a-f0-9]{32}\.json$/.test(name)) continue;
       try {
+        if(this.privateFiles)privatePath(path.join(this.root,'jobs',name));
         const job = JSON.parse(fs.readFileSync(path.join(this.root, 'jobs', name), 'utf8'));
+        if(this.privateFiles&&(!job||job.id+'.json'!==name||!validRemote(job.source)||!path.isAbsolute(job.destination)||!path.isAbsolute(job.partial)||path.dirname(job.partial)!==path.dirname(job.destination)||!path.basename(job.partial).endsWith('.'+job.id+'.part')||!Number.isInteger(job.concurrency)||job.concurrency<1||job.concurrency>16||!Number.isSafeInteger(job.size)||job.size<0||!Number.isSafeInteger(job.chunk)||job.chunk<1||job.chunk>8*1024*1024||(job.sha256&&!/^[a-f0-9]{64}$/.test(job.sha256))||!Array.isArray(job.done)||job.done.some(i=>!Number.isInteger(i)||i<0||i>=Math.ceil(job.size/job.chunk))))throw Error();
+        if(job.status==='complete'&&job.cleanupWarning)this.options.onConnection?.('error');
         if (job.error) job.error = 'Previous download failed. Check the destination and remote connection before retrying.';
         if (!['complete','cancelled'].includes(job.status)) job.status = 'paused';
         this.jobs.set(job.id, job);
-      } catch {}
+      } catch {if(this.privateFiles)throw new ToolkitError('Saved download state is invalid or unsafe. Inspect it before continuing.');}
     }
+    if(this.privateFiles)this.releaseLock=acquireLock(this.root);
   }
-  save(job) { writeJson(path.join(this.root, 'jobs', job.id + '.json'), job); }
+  save(job) { const file=path.join(this.root,'jobs',job.id+'.json');if(this.privateFiles&&fs.existsSync(file))privatePath(file);writeJson(file,job); }
   list() {
     return [...this.jobs.values()].reverse().map(job => {
       const live = this.live.get(job.id), done = new Set(job.done);
@@ -71,12 +75,12 @@ class DownloadManager {
   }
   async create({source, folder, concurrency=12}) {
     if (this.closed) throw new ToolkitError('Download manager is closing');
-    if (typeof source!=='string' || !source.startsWith('/') || source.length>4096 || /[\x00-\x1f]/.test(source))
+    if (!validRemote(source))
       throw new ToolkitError('Enter an absolute remote file path');
-    if (typeof folder!=='string' || !path.isAbsolute(folder) || folder.length>220) throw new ToolkitError('Enter an absolute local folder path');
+    if (typeof folder!=='string' || !path.isAbsolute(folder) || folder.length>(this.privateFiles?4096:220)||/[\x00-\x1f]/.test(folder)) throw new ToolkitError('Enter an absolute local folder path');
     if (!Number.isInteger(concurrency) || concurrency<1 || concurrency>16) throw new ToolkitError('Choose 1 to 16 connections');
     if ([...this.jobs.values()].filter(j=>!['complete','cancelled'].includes(j.status)).length>=20) throw new ToolkitError('Pause or finish an existing download first');
-    folder=path.resolve(folder); fs.mkdirSync(folder,{recursive:true});
+    folder=path.resolve(folder);try{fs.mkdirSync(folder,{recursive:true});fs.accessSync(folder,fs.constants.W_OK|fs.constants.X_OK);}catch(error){throw localError(error);}
     const id=crypto.randomUUID().replaceAll('-',''), name=safeName(source), ext=path.extname(name), stem=name.slice(0,name.length-ext.length);
     let destination=path.join(folder,name), suffix=1;
     while(fs.existsSync(destination)||[...this.jobs.values()].some(j=>j.destination===destination&&j.status!=='cancelled')) destination=path.join(folder,`${stem} (${++suffix})${ext}`);
@@ -86,26 +90,43 @@ class DownloadManager {
     this.start(job); return this.list().find(j=>j.id===id);
   }
   start(job) {
+    if(this.closed)throw new ToolkitError('Download manager is closing');
     if (this.runs.has(job.id)) throw new ToolkitError('This download is already running');
     const controller=new AbortController();
     const promise=this.run(job,controller.signal).catch(error=>{
-      job.status=controller.signal.aborted?'paused':'error';job.error=controller.signal.aborted?null:publicMessage(error, 'Download failed. Check file permissions and the remote connection.');this.save(job);
+      job.status=controller.signal.aborted?'paused':'error';if(!controller.signal.aborted)this.options.onConnection?.('error');job.error=controller.signal.aborted?null:publicMessage(localError(error), 'Download failed. Check file permissions and the remote connection.');this.save(job);
     }).finally(()=>{this.live.delete(job.id);this.runs.delete(job.id);});
     this.runs.set(job.id,{controller,promise});
   }
   async run(job,signal) {
     job.error=null;
     if (!job.sha256) {
-      job.status='preparing';this.save(job);
-      const meta=await this.transport.prepare(job);job.size=meta.size;job.sha256=meta.sha256;job.fingerprint=meta.fingerprint;
+      job.status='preparing';job.cleanupWarning='Transfer access cleanup pending; use Clear access.';this.save(job);
+      const meta=await this.transport.prepare(job);
+      const handle=fs.openSync(job.partial,'wx',0o600);
+      try{fs.ftruncateSync(handle,meta.size);fs.fsyncSync(handle);}catch(error){fs.closeSync(handle);fs.unlinkSync(job.partial);throw error;}
+      fs.closeSync(handle);job.size=meta.size;job.sha256=meta.sha256;job.fingerprint=meta.fingerprint;
       job.chunk=chunkSize(job.size,job.concurrency);
-      const handle=fs.openSync(job.partial,'wx');try{fs.ftruncateSync(handle,job.size);}finally{fs.closeSync(handle);}
       this.save(job);
     }
     if(signal.aborted)throw new ToolkitError('Paused');
+    if(job.publishing&&fs.existsSync(job.destination)){
+      const info=fs.lstatSync(job.destination);
+      if(!info.isFile()||info.dev!==job.publishing.dev||info.ino!==job.publishing.ino)throw new ToolkitError('Destination already exists. Existing files are never overwritten.');
+      const digest=crypto.createHash('sha256');for await(const block of fs.createReadStream(job.destination)){if(signal.aborted)throw new ToolkitError('Paused');digest.update(block);}
+      if(digest.digest('hex')!==job.sha256)throw new ToolkitError('Published file checksum failed. Existing files are retained.');
+      if(fs.existsSync(job.partial)){const part=fs.lstatSync(job.partial);if(part.dev!==info.dev||part.ino!==info.ino)throw new ToolkitError('Partial file changed. Existing files are retained.');fs.unlinkSync(job.partial);}
+      return this.complete(job);
+    }
     if(!fs.existsSync(job.partial))throw new ToolkitError('Partial file is missing. Create a new download.');
-    const fd=fs.openSync(job.partial,'r+'), done=new Set(job.done);
-    if(fs.fstatSync(fd).size!==job.size){fs.closeSync(fd);throw new ToolkitError('Partial file size changed. Create a new download.');}
+    if(this.privateFiles)privatePath(job.partial);
+    const fd=fs.openSync(job.partial,fs.constants.O_RDWR|(this.privateFiles?fs.constants.O_NOFOLLOW:0)), done=new Set(job.done);
+    let results;try{
+    // Recheck persisted ranges after restart; legacy jobs retain the final whole-file check.
+    job.chunkHashes ||= {};
+    for(const index of done){if(!job.chunkHashes[index])continue;const data=Buffer.alloc(Math.min(job.chunk,job.size-index*job.chunk));fs.readSync(fd,data,0,data.length,index*job.chunk);if(crypto.createHash('sha256').update(data).digest('hex')!==job.chunkHashes[index]){done.delete(index);delete job.chunkHashes[index];}}
+    job.done=[...done];
+    if(fs.fstatSync(fd).size!==job.size)throw new ToolkitError('Partial file size changed. Create a new download.');
     const live={ranges:new Map(),start:Date.now(),initialBytes:[...done].reduce((n,i)=>n+Math.min(job.chunk,job.size-i*job.chunk),0)};
     this.live.set(job.id,live);job.status='downloading';job.error=null;this.save(job);
     const queue=Array.from({length:Math.ceil(job.size/job.chunk)},(_,i)=>i).filter(i=>!done.has(i));let cursor=0,failed=false;
@@ -114,11 +135,11 @@ class DownloadManager {
         for(let attempt=0;attempt<6&&!signal.aborted;attempt++){
           try{
             await this.slots.run(signal,async()=>{
-              live.ranges.set(index,0);
+              live.ranges.set(index,0);let received=0;const digest=crypto.createHash('sha256');
               try{await this.transport.read(job,offset,length,signal,(data,position)=>{
-                if(position<0||position+data.length>length)throw new ToolkitError('Invalid byte range');
-                fs.writeSync(fd,data,0,data.length,offset+position);live.ranges.set(index,position+data.length);
-              });}finally{live.ranges.delete(index);}
+                if(position!==received||position+data.length>length)throw new ToolkitError('Invalid byte range');
+                let written=0;while(written<data.length){const count=fs.writeSync(fd,data,written,data.length-written,offset+position+written);if(!count)throw new ToolkitError('Unable to write download range.');written+=count;}digest.update(data);received+=data.length;live.ranges.set(index,received);
+              });if(received!==length)throw new ToolkitError('Incomplete byte range');job.chunkHashes[index]=digest.digest('hex');}finally{live.ranges.delete(index);}
             });success=true;break;
           }catch(error){lastError=error;if(signal.aborted)break;job.retries++;this.save(job);
             await new Promise(resolve=>{const timer=setTimeout(finish,Math.min(10000,1000*(attempt+1)));function finish(){clearTimeout(timer);signal.removeEventListener('abort',finish);resolve();}signal.addEventListener('abort',finish,{once:true});});
@@ -129,20 +150,23 @@ class DownloadManager {
         fs.fsyncSync(fd);done.add(index);job.done=[...done];this.save(job);
       }
     };
-    let results;
-    try{results=await Promise.allSettled(Array.from({length:job.concurrency},worker));}finally{fs.closeSync(fd);}
+    results=await Promise.allSettled(Array.from({length:job.concurrency},worker));}finally{fs.closeSync(fd);}
     if(signal.aborted)throw new ToolkitError('Paused');
     const error=results.find(r=>r.status==='rejected');if(error)throw error.reason;
     job.status='verifying';this.save(job);
     const digest=crypto.createHash('sha256');for await(const block of fs.createReadStream(job.partial)){if(signal.aborted)throw new ToolkitError('Paused');digest.update(block);}
     if(digest.digest('hex')!==job.sha256)throw new ToolkitError('Checksum failed. The partial file has been retained. Start a new download.');
+    const info=fs.statSync(job.partial);job.publishing={dev:info.dev,ino:info.ino};this.save(job);
     // Hard-link with exclusive destination semantics: never overwrite a file which appeared during transfer.
     try{fs.linkSync(job.partial,job.destination);}catch(error){
       if(!['EPERM','ENOTSUP','EACCES'].includes(error.code))throw error;
       fs.copyFileSync(job.partial,job.destination,fs.constants.COPYFILE_EXCL);
     }
-    fs.unlinkSync(job.partial);job.verified=true;job.status='complete';this.save(job);
-    try{await this.transport.cleanup(job);}catch{job.cleanupWarning='Transfer access cleanup pending; use Clear access.';this.save(job);}
+    fs.unlinkSync(job.partial);await this.complete(job);
+  }
+  async complete(job){
+    job.verified=true;job.status='complete';delete job.publishing;this.save(job);
+    try{await this.transport.cleanup(job);job.cleanupWarning=null;this.save(job);}catch{job.cleanupWarning='Transfer access cleanup pending; use Clear access.';this.save(job);}
     await this.options.onComplete?.(job).catch(()=>{});
   }
   async action(id,action) {
@@ -166,6 +190,6 @@ class DownloadManager {
     return this.list().find(j=>j.id===id);
   }
   async pauseAll(){await Promise.all([...this.runs.keys()].map(id=>this.action(id,'pause')));}
-  async close(){this.closed=true;await this.pauseAll();}
+  async close(){this.closed=true;await this.pauseAll();if(this.releaseLock){this.releaseLock();this.releaseLock=null;}}
 }
 module.exports={DownloadManager,Semaphore,safeName,chunkSize};

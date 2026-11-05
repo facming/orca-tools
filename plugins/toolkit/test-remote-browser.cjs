@@ -2,20 +2,20 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
 const {RemoteBrowser}=require('./remote-browser.cjs'),preferences=require('./download-preferences.cjs'),{startServer}=require('./server.cjs');
 test('remote browser uses a read-only RPC, filters hidden entries and sorts folders first',async()=>{
- const calls=[];const browser=new RemoteBrowser({}, {createClient:()=>({isRemote:true,async call(method,params){calls.push({method,params});return {ok:true,_meta:{runtimeId:'remote'},result:{pathFlavor:'posix',resolvedPath:'/home/worker',entries:[{name:'file.mp4',isDirectory:false},{name:'中文目录',isDirectory:true},{name:'.private',isDirectory:false},{name:'../bad',isDirectory:false}]}};}})});
- const value=await browser.list('Server',{directory:'/home/worker'});assert.equal(value.entries.length,2);assert.equal(value.entries[0].isDirectory,true);assert.equal(value.entries[1].path,'/home/worker/file.mp4');assert.deepEqual(calls,[{method:'files.browseServerDir',params:{path:'/home/worker'}}]);assert.equal(value.parent,'/home');
- const hidden=await browser.list('Server',{showHidden:true,query:'.private'});assert.equal(hidden.entries[0].name,'.private');
+ const calls=[];const browser=new RemoteBrowser({}, {listProjects:async()=>['/home/worker'],createClient:()=>({isRemote:true,async call(method,params){calls.push({method,params});return {ok:true,_meta:{runtimeId:'remote'},result:{pathFlavor:'posix',resolvedPath:'/home/worker',entries:[{name:'file.mp4',isDirectory:false},{name:'中文目录',isDirectory:true},{name:'.private',isDirectory:false},{name:'../bad',isDirectory:false}]}};}})});
+ const value=await browser.list('Server',{directory:'/home/worker'});assert.equal(value.entries.length,2);assert.equal(value.entries[0].isDirectory,true);assert.equal(value.entries[1].path,'/home/worker/file.mp4');assert.deepEqual(calls,[{method:'files.browseServerDir',params:{path:'/home/worker'}}]);assert.equal(value.parent,null);
+ const hidden=await browser.list('Server',{directory:'/home/worker',showHidden:true,query:'.private'});assert.equal(hidden.entries[0].name,'.private');
  await assert.rejects(browser.list('Server',{directory:'relative'}),/absolute/);await assert.rejects(browser.list('Server',{offset:-1}),/options/);
 });
 test('large remote directories paginate and root has no parent',async()=>{
  const entries=Array.from({length:205},(_,i)=>({name:'file-'+String(i).padStart(3,'0'),isDirectory:false}));
- const browser=new RemoteBrowser({}, {createClient:()=>({isRemote:true,async call(){return {ok:true,_meta:{runtimeId:'remote'},result:{resolvedPath:'/',pathFlavor:'posix',entries}};}})});
- const first=await browser.list('s');assert.equal(first.entries.length,200);assert.equal(first.hasMore,true);assert.equal(first.parent,null);
- const last=await browser.list('s',{offset:200});assert.equal(last.entries.length,5);assert.equal(last.hasMore,false);
+ const browser=new RemoteBrowser({}, {listProjects:async()=>['/home/worker'],createClient:()=>({isRemote:true,async call(){return {ok:true,_meta:{runtimeId:'remote'},result:{resolvedPath:'/home/worker',pathFlavor:'posix',entries}};}})});
+ const first=await browser.list('s',{directory:'/home/worker'});assert.equal(first.entries.length,200);assert.equal(first.hasMore,true);assert.equal(first.parent,null);
+ const last=await browser.list('s',{directory:'/home/worker',offset:200});assert.equal(last.entries.length,5);assert.equal(last.hasMore,false);
 });
 test('browser refuses local fallback and does not return sensitive connection errors',async()=>{
- const local=new RemoteBrowser({}, {createClient:()=>({isRemote:false})});await assert.rejects(local.list('s'),/not remote/);
- const failed=new RemoteBrowser({}, {createClient:()=>({isRemote:true,async call(){throw Error('private pairing credential');}})});await assert.rejects(failed.list('s'),e=>!e.message.includes('credential')&&e.message.includes('Unable to list'));
+ const local=new RemoteBrowser({}, {listProjects:async()=>['/home/worker'],createClient:()=>({isRemote:false})});await assert.rejects(local.list('s',{directory:'/home/worker'}),/not remote/);
+ const failed=new RemoteBrowser({}, {listProjects:async()=>['/home/worker'],createClient:()=>({isRemote:true,async call(){throw Error('private pairing credential');}})});await assert.rejects(failed.list('s',{directory:'/home/worker'}),e=>!e.message.includes('credential')&&e.message.includes('Unable to list'));
 });
 test('local folder, remote source and directory preferences merge and remain server-specific',()=>{
  const root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-address-'));try{

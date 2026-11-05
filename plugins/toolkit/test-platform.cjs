@@ -208,11 +208,11 @@ test('macOS activation shares one runtime, serves local previews and cannot star
   const html = await (await fetch(url)).text();
   const headers = {'X-Toolkit-Token': html.match(/const token='([a-f0-9]+)'/)[1], Origin: new URL(url).origin, 'Content-Type': 'application/json'};
   const state = await (await fetch(url + 'api/status', {headers})).json();
-  assert.deepEqual(Object.values(state.modules).map(m => m.status), ['preview', 'preview', 'unsupported']);
+  assert.deepEqual(Object.values(state.modules).map(m => m.status), ['preview', 'needs-setup', 'unsupported']);
   for (const [route, method] of [['downloads/jobs', 'POST'], ['gpu/open', 'POST'], ['gpu/native', 'GET']]) {
     const response = await fetch(url + 'api/' + route, {method, headers, body: method === 'POST' ? '{}' : undefined});
     assert.equal(response.status, 400);
-    assert.match((await response.json()).error, /macOS/);
+    assert.match((await response.json()).error, route.startsWith('downloads')?/Configure/:/macOS/);
   }
   assert.equal((await (await fetch(url + 'api/accounts', {headers})).json()).requiresRefresh, true);
   const post = (route, body) => fetch(url + 'api/' + route, {method: 'POST', headers, body});
@@ -232,7 +232,7 @@ test('macOS activation shares one runtime, serves local previews and cannot star
   const jobs = await (await fetch(url + 'api/downloads/jobs', {headers})).json();
   assert.equal(jobs.defaultFolder, selected);
   assert.deepEqual(jobs.jobs, []);
-  assert.equal(jobs.preview, true);
+  assert.equal(jobs.availability.status, 'needs-setup');
   assert.equal(service.controller.downloads, null);
   assert.equal(openGpu.mock.callCount(), 0);
   await plugin.deactivate();

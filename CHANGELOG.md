@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-05 — macOS Downloads 阶段 3 开发记录
+
+- 解除 Downloads preview，复用平台 runtime 和下载引擎；初始化仅表示本地配置可用，远程成功/失败按实际请求更新，任务页面显示持久化状态。Accounts 保持阶段 2，GPU 保持 unsupported。
+- 每任务 Ed25519/known_hosts、StrictHostKeyChecking、forced-command reader 与授权清理保留；Mac 状态目录 0700、私钥/known_hosts/任务文件 0600，隔离 SSH 用户配置和 agent。远程浏览及下载源限制在已有 Orca 项目目录，拒绝路径越界和目录符号链接。
+- 增加 Mac 管理进程锁、异常退出恢复、持久化分块校验、APFS 发布中断恢复、磁盘不足/TCC 拒绝诊断；中文和空格目录、原生选择取消、Finder 打开路由保留。
+- 本阶段仅 mock 与本地离线测试；真实 VPS 下载、真实 SSH 连接和 TCC 拒绝尚未测试，不构成真实传输验收。未生成真实 SSH 密钥、访问真实远程文件或修改系统网络设置。
+
 ## 2026-11-05 — macOS Accounts 阶段 2 开发记录
 
 - 复用 Accounts 业务及阶段 1 platform runtime，支持用户配置的远程 environment。Mac 激活、页面打开、总览计数和状态检查不构造 RuntimeClient、不调用 Accounts RPC；用户点击刷新或账号操作后才访问远程。

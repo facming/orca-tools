@@ -37,3 +37,30 @@ with tempfile.TemporaryDirectory(prefix='orca-reader-test-') as folder:
     assert call('done').returncode == 0
     assert keys.read_text() == 'PRESERVE_OTHER_KEY\n' and not job_path.exists()
 print('PASS: exact ranges, command rejection, bounds, changed-source rejection, scoped key cleanup.')
+
+# Registration runs only with an isolated HOME and a synthetic host public key.
+import importlib.util
+from unittest.mock import patch
+spec = importlib.util.spec_from_file_location('reader_fixture', reader)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+with tempfile.TemporaryDirectory(prefix='orca-register-test-') as folder:
+    home = pathlib.Path(folder)
+    (home / '.ssh').mkdir()
+    source = home / '中文 file.bin'
+    source.write_bytes(b'synthetic data')
+    original_read_text = pathlib.Path.read_text
+    def read_text(file, *args, **kwargs):
+        if str(file) == '/etc/ssh/ssh_host_ed25519_key.pub':
+            return 'ssh-ed25519 U1lOVEhFVElD fixture'
+        return original_read_text(file, *args, **kwargs)
+    with patch.object(pathlib.Path, 'home', return_value=home), patch.object(pathlib.Path, 'read_text', read_text):
+        meta = module.register({'id': job_id, 'source': str(source),
+                                'publicKey': 'ssh-ed25519 U1lOVEhFVElD orca-download:' + job_id})
+    line = (home / '.ssh/authorized_keys').read_text()
+    assert line.startswith('restrict,command="python3 ')
+    assert 'remote-reader.py' in line and job_id in line
+    assert meta['sha256'] == hashlib.sha256(b'synthetic data').hexdigest()
+    assert (home / '.ssh/authorized_keys').stat().st_mode & 0o777 == 0o600
+    assert (home / ('.local/share/orca-parallel-download/jobs/' + job_id + '.json')).stat().st_mode & 0o777 == 0o600
+print('PASS: isolated registration, forced-command restriction, hash and metadata permissions.')
