@@ -312,8 +312,9 @@ def make_handler(bridge, security=None):
             if not self.authorized():
                 self.close_connection = True; return self.send_json(403, {'error': 'Access denied.'})
             route = urllib.parse.urlsplit(self.path).path
-            if bridge.platform.comfy_only and route.startswith(('/v1/native', '/v1/unity', '/v1/vroid', '/v1/tripo')):
-                return self.send_json(404, {'error': 'Unsupported on macOS; only ComfyUI is enabled.'})
+            if bridge.platform.restricted_native and route.startswith(('/v1/native', '/v1/unity', '/v1/vroid', '/v1/tripo')):
+                from bridge_platform.macos_godot_http import handle_native
+                return handle_native(self, bridge, route, security)
             try:
                 if self.command == 'GET' and route == '/v1/status':
                     try: backend = bridge.adapters['comfyui.workflow'].status()
@@ -410,10 +411,10 @@ def make_handler(bridge, security=None):
                 return self.send_json(404, {'error': 'Unknown route.'})
             except (ValueError, KeyError, TypeError, urllib.error.URLError) as error:
                 self.close_connection = True
-                return self.send_json(400, {'error': 'ComfyUI request rejected. Check workflow parameters, job state and local service status.' if bridge.platform.comfy_only else str(error)[:2000]})
+                return self.send_json(400, {'error': 'ComfyUI request rejected. Check workflow parameters, job state and local service status.' if bridge.platform.restricted_native else str(error)[:2000]})
             except (BrokenPipeError, ConnectionResetError, TimeoutError): self.close_connection = True
             except Exception:
-                logging.error('Bridge request failed') if bridge.platform.comfy_only else logging.exception('Bridge request failed')
+                logging.error('Bridge request failed') if bridge.platform.restricted_native else logging.exception('Bridge request failed')
                 self.close_connection = True; self.send_json(500, {'error': 'Local bridge error. Check the local bridge log.'})
         do_GET = handle_request
         do_POST = handle_request

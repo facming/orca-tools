@@ -66,3 +66,24 @@ test('Mac GPU panel has no native scripts or firewall controls; Windows panel pr
  assert.ok(mac.includes('ComfyUI on Mac'));assert.ok(mac.includes("'/api/status'"));assert.ok(mac.includes("'/api/gpu/workflows'"));
  assert.ok(!mac.includes('HNetCfg'));assert.ok(!mac.includes("'/api/gpu/native/setup'"));assert.ok(win.includes("'/api/gpu/native/setup'"));
 });
+test('Godot availability is independent of ComfyUI and requires every verified check',async t=>{
+ const f=fixture(t),state=await manager(t,f),gpu=new Gpu(f.runtime);
+ const names=['installed','path','permissions','version','architecture','bridge_api'];
+ state.value.godot={state:'available',checks:Object.fromEntries(names.map(k=>[k,true]))};
+ state.value.checks.comfyui=false;state.value.ready=false;
+ let status=await gpu.status();assert.equal(status.online,false);assert.equal(status.godot.state,'available');
+ for(const key of names){state.value.godot.checks[key]=false;assert.equal((await gpu.status()).godot.state,'error',key);state.value.godot.checks[key]=true;}
+ for(const value of ['installed','running','unsupported','error']){state.value.godot.state=value;assert.equal((await gpu.status()).godot.state,value);}
+ state.value.godot.state='available';state.value.platform='win32';assert.equal((await gpu.status()).godot.state,'error');
+ state.value.platform='darwin';state.value.ready=true;state.value.checks.comfyui=true;
+ state.value.godot.state='error';assert.equal((await gpu.status()).online,true);
+});
+test('Toolkit status and panel expose distinct Godot capability without native write routes',async t=>{
+ const f=fixture(t),state=await manager(t,f);
+ state.value.godot={state:'installed',checks:{installed:true}};
+ const s=await startServer({runtime:f.runtime,dataDir:f.runtime.configDir,port:0});t.after(()=>s.close());
+ const html=await (await fetch(s.url)).text(),token=html.match(/const token='([a-f0-9]+)'/)[1];
+ const result=await (await fetch(s.url+'api/status',{headers:{'X-Toolkit-Token':token}})).json();
+ assert.equal(result.modules.gpu.godot.state,'installed');assert.equal(result.modules.gpu.status,'ready');
+ assert.match(html,/godot-state/);assert.match(html,/not sandboxed/);
+});

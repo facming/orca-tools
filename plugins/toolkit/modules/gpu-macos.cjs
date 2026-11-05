@@ -34,8 +34,14 @@ class MacGpu {
   try{
    const value=await this.request();
    const online=value.platform==='darwin'&&value.capability==='comfyui'&&value.ready===true&&checks.every(key=>value.checks?.[key]===true);
-   return {online,status:online?'ready':'offline',capability:'comfyui',checks:value.checks};
-  }catch{return {online:false,status:'offline',capability:'comfyui'};}
+   const source=value.godot,godotChecks=['installed','path','permissions','version','architecture','bridge_api'];
+   let godot={state:'unsupported'};
+   if(source&&['installed','available','running','unsupported','error'].includes(source.state)){
+    const valid=value.platform==='darwin'&&godotChecks.every(k=>source.checks?.[k]===true);
+    godot={state:['available','running'].includes(source.state)&&!valid?'error':source.state,checks:source.checks};
+   }
+   return {online,status:online?'ready':'offline',capability:'comfyui',checks:value.checks,godot};
+  }catch{return {online:false,status:'offline',capability:'comfyui',godot:{state:'error'}};}
  }
  async open(){await this.request();return {url,ready:(await this.status()).online};}
 }

@@ -368,3 +368,124 @@ python3 scripts/check.py
 - diff whitespace、源码/语法/私密文件扫描通过。已有 malformed workflow 夹具的预期异常日志不表示失败。
 
 **剩余风险和未验证项：** 本轮仍只用临时目录、Mock Tailscale/ifconfig/lsof/launchctl/Popen/killpg 及合成回环 HTTP，未读取真实配置/Token、连接 VPS、注册 LaunchAgent、启动真实 ComfyUI 或执行 GPU 工作流。实际 utun/flag/lsof 输出、信号时序、MPS、TCC 和 Windows 实机仍待人工授权验收。监测是有超时的轮询，不是网络沙箱；撤销与 socket 写入之间仍不是内核原子隔离，已经发出的数据无法撤回。卸载复验覆盖耗时系统操作窗口，不保证抵御同一登录用户在最终检查与 unlink 之间恶意并发替换；不对不可信本地用户代码作沙箱承诺。SIGKILL/断电可能遗留 ComfyUI，服务保持禁止自动接管和自动重启，需人工检查。对实际安装的代码更新仍须独立审查和人工批准，本任务只更新源码和原 Draft PR。
+
+## 15. 阶段 5A Godot 原生适配（2026-11-05）
+
+开始时工作区干净；fetch 后本地与 `origin/feature/macos-gpu-comfyui` 均为 `b2fdd22204af25e0cecf8e73f87a7fc684267b83`。从该基线创建 `feature/macos-godot`；Draft PR base 为 `feature/macos-gpu-comfyui`。不修改 main、不自动合并，继续 ChatGPT 审查 → 人工批准。
+
+实施前审计及文件复用清单、配置格式、接口和限制见 [实施文档第 9 节](macos-port-implementation.md#9-阶段-5a-godot实施前复用清单2026-11-05)。新增独立 Mac Godot 控制与受限路由；Windows NativeControl、ManagedProcess、Blender 和 Godot 截图脚本的生产实现未改。既有 Mac 平台模块不是新建空文件，而是在阶段 4 基础上接入独立 Godot 工厂。ComfyUI 六项健康、安全监测和进程管理保持原逻辑。
+
+| 要求 | 离线证据 |
+| --- | --- |
+| 路径发现 | 临时目录中构造改名 app bundle/Info.plist/Mach-O；自定义搜索目录与用户指定二进制可发现，未指定/未安装失败关闭；发现不调用 version/Popen。 |
+| 版本、架构、权限 | Mock version/help 验证 4.5+ stable、编辑器参数；旧版/dev/major 5/export template 拒绝。合成 arm64、universal、x86_64 header 与非 Mach-O、无执行权限、可执行文件链接拒绝。没有运行任何候选二进制。 |
+| 项目授权和路径 | 必须显式 enabled/allow_scripts/authorized；相对路径、绝对路径注入、点段、相似路径、跨目录符号链接、整个项目内的链接和项目 inode 替换拒绝。 |
+| 参数及环境 | Popen Mock 验证 headless import/recovery、editor、run、script、capture 参数数组，user_args 仅在 `--` 后；无 shell，固定 PATH/HOME/TMPDIR/LANG，不继承合成 TOKEN/DYLD。 |
+| 进程与异常 | Mock 自然退出/非零退出、超时、排队及运行取消、TERM→KILL、独立项目停止、停止后新任务拒绝、请求 ID 幂等/冲突；记录 PID/start/project identity。所有 killpg 均被 Mock。 |
+| 外部进程和恢复 | 没有受管任务时 stop 不发信号；重启的 running 元数据转为结果未知，不向存盘 PID 发信号、不自动重投；Godot 存储损坏不关闭 ComfyUI。 |
+| 日志 | 合成 secret、用户路径和文档保留 IP 放入 Mock 异常，远程错误/日志不包含这些值；只返回固定诊断，不声称完整 Godot log。 |
+| 截图和产物 | 合成真实 PNG 编码，验证尺寸/CRC/像素解压与格式错误、截短、尾部注入、现存输出、硬链接、符号链接、下载前内容替换；MCP 下载合成 PNG 字节一致。 |
+| MCP 与鉴权 | 真实回环 HTTP + 原 Client，覆盖项目、capture、状态/等待兼容、产物下载、logs/stop；缺少授权拒绝，未开放 API 返回 unsupported；新 API 的 keep-alive 错误 token/peer 均 403。旧 Windows capture 请求信封保持一致，ComfyUI tools 不增加 Godot 条目。 |
+| Toolkit | ComfyUI 离线时 Godot 可单独 available；Godot 六项检查逐一置假均不得 available/running；Godot error 不影响 ComfyUI ready；真实回环 Toolkit 状态与面板包含独立状态。 |
+| 服务与安装 | 安装预览接受 native 配置且不执行 Godot；安装列表包含完整模块/截图脚本。管理端口启动失败的 finally 清理分别关闭 Godot 和 ComfyUI；原阶段 4 的网络/权限/服务测试全部保留。 |
+
+验证命令：
+
+```sh
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_macos_godot.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+node --test plugins/toolkit/test-macos-gpu.cjs
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+python3 -m unittest discover -s scripts -p 'test_install.py'
+git diff --check
+python3 scripts/check.py
+```
+
+测试计数见本节最终结果；所有跳过项仍须真实 Windows 验收，不计为通过。全量测试中既有 malformed workflow 的预期异常日志不是测试失败。
+
+**Mock 与实机验收分开。** 没有打开真实 Godot、执行用户现有脚本、修改用户项目、安装 Godot、读取真实 Bridge 配置/Token、访问 VPS、申请 TCC、注册 LaunchAgent、设置防火墙或修改应用签名。所有 Godot subprocess.run/Popen/killpg 都是 Mock；PNG 来自合成像素。回环 API 和文件校验是真实执行，但不能替代图形会话、驱动或 Godot runtime 兼容性验收。
+
+**审查并人工授权后才能进行的验收：**
+
+1. 用户选择已有可信 Godot 编辑器和专用项目副本；审核 executable、canonical root、allow_scripts，并在每次任务中明确 authorized。先处理 app 签名/Gatekeeper/TCC，如有权限阻塞即停止，禁止绕过或自动提权。
+2. 人工审核阶段 4 已安装应用的更新与私有配置变更，停止服务后备份/核对，再显式启动；安装器不覆盖已有安装。验证 Godot 状态不依赖 ComfyUI 运行，反向亦然。
+3. 在专用副本上验证 headless import/run/script、真实退出码、编辑器打开/停止、超时取消、PNG scene capture 与实际渲染后端；观察 Godot 正常导入写入的 `.godot`。不在用户工作项目上试运行。
+4. 验证真实 macOS session 信号和 LaunchAgent 退出。SIGKILL/断电可能遗留进程；启动后必须显示未知失败，人工检查，禁止自动接管/kill 历史 PID。
+5. 在已授权专用 VPS 验证旧 MCP 调用和新增操作、Tailscale/token 轮换、PNG 下载哈希。不要把合成回环测试描述为真实远程验收。
+
+**保留限制。** 支持范围为原生 arm64 的 Godot 4.5+ stable major 4 编辑器，仍需实机验证具体版本；截图需要图形会话，默认 gl_compatibility，未宣称 Metal/硬件渲染实测。只返回 PNG 与固定诊断；文件/Git/任意 shell/Go broker 等未实现操作明确 unsupported。Godot 项目代码仍拥有登录用户文件和网络权限，符号链接预检查不约束执行中的代码，进程组不等同 Job Objects，已脱离 session 的后代不保证受控。原阶段 4 Tailscale/MPS/Intel/Windows 实机缺口和 Toolkit worker 回收限制继续存在。
+
+最终离线结果：Godot 专项 **30/30 通过**；全部 Python Bridge **215 项，212 通过、0 失败、3 Windows 专属跳过**；Mac GPU Node 专项 **8/8 通过**；全部 Toolkit Node **80 项，79 通过、0 失败、1 Windows 原生探针跳过**。额外调用 Windows 安装器套件 3 项，全部因当前平台不是 Windows 跳过，不计为安装器通过。diff whitespace 与源码/语法/私密文件扫描通过；新增 IP/路径仅回环、文档占位符和明确的测试合成值，没有用户本机路径或真实网络信息。
+
+## 16. PR #6 变基继承 PR #5 安全修复（2026-11-05）
+
+同步前工作区干净；fetch 和 GitHub PR 元数据确认：PR #5 / `feature/macos-gpu-comfyui` HEAD 为 `1441fd5986951f3b392993d6945b6b8ce370be2a`，PR #6 / `feature/macos-godot` HEAD 为 `d092510003f27ab327acbf1cd97e4d007b641ca9`，旧共同基线为 `b2fdd22204af25e0cecf8e73f87a7fc684267b83`。本次仅修改 Godot 分支，不修改 PR #5/main，不创建新 PR，PR #6 继续 Draft。
+
+- **新基线 SHA：** `1441fd5986951f3b392993d6945b6b8ce370be2a`。
+- **变基后的 Godot 原功能提交：** `72d1e23382d007936a69fc3170c9b9482d646e75`，保留 `feat(macos): add native Godot support` 内容与提交说明。
+- **新实现 HEAD SHA（已通过本节全部回归）：** `137213608d969446f0d6f8885ad9e8d83e4ba235`，含必要的 Godot 下载撤销兼容修复及冲突回归测试。
+- 本节随后以独立文档提交记录。包含本文自身提交的最终分支 HEAD SHA 写入 [PR #6 描述](https://github.com/facming/orca-tools/pull/6)，并可通过 `git rev-parse feature/macos-godot` 获取；不把文档提交前的实现 SHA 冒称最终交付 SHA。
+
+使用 `git rebase --onto 1441fd5986951f3b392993d6945b6b8ce370be2a b2fdd22204af25e0cecf8e73f87a7fc684267b83 feature/macos-godot`，只重放 Godot 功能提交。PR #5 的安全修复作为祖先继承，没有复制/重复 cherry-pick 为额外提交。推送前再次核对远端原 HEAD，使用精确租约 `--force-with-lease=refs/heads/feature/macos-godot:d092510003f27ab327acbf1cd97e4d007b641ca9`；远端变化时推送必须失败，不允许无条件 force。
+
+**冲突处理。** 共三个文件：`CHANGELOG.md`、本审计文档和 `macos_service.py`。两份文档保留双方完整历史记录，PR #5 追加审计仍为第 14 节，Godot 原始审计移至第 15 节。服务清理保留 PR #5 对远程 socket、管理 socket、monitor 和 ComfyUI 的嵌套 finally，将 Godot close 放入内层独立 try/finally；即使 Godot close 失败也必须执行 ComfyUI stop。没有删除任何安全检查，也没有需要降低安全边界才能解决的实质冲突。
+
+**必要的调用兼容修复。** Godot 独立原生下载路由此前未接收 RuntimeSecurity。本次透传同一个 security 对象，在产物读取结束、发送成功头之前以及每个输出分块之前检查 revoked；网络安全撤销后关闭连接，不再发出刚读取的产物。JSON 和任务请求继续使用原逐请求 Token/peer 校验与请求体读取后的验证。没有改变 MCP 请求格式、Godot 授权/任务/PNG 校验或 ComfyUI API。
+
+| 回归重点 | 证据 |
+| --- | --- |
+| ComfyUI 六项健康 | 保留 installed/launch_agent/tailscale/token/peers/comfyui 条件；原 health/Toolkit 逐项失败测试通过。Godot 的可用性保持单独字段，不把 ComfyUI 健康当成 Godot 健康。 |
+| Tailscale 与撤销 | 保留运行期检测、唯一 UP/RUNNING utun、无地址回退、故障锁定及重启前重新验证。PR #5 两份安全测试文件逐字保留。 |
+| Bearer / peer | 原远程每请求/keep-alive、Token 轮换、管理请求慢 body、session 权限、产物流撤销测试通过；Godot 路由每请求拒绝错误 Token/peer 的测试保留。 |
+| ComfyUI 生命周期 | `ComfyProcess` 与 PR #5 的 AST 完全一致，保留 listener 所有权、撤销先于等待、启动锁监测和 probe 期间停止禁止迟到 Popen。 |
+| Godot 独立控制 | 原 macos_godot.py 与同步前逐字一致；超时、取消、退出、重启未知结果、只控制持有子进程、不接管外部 PID 均通过。 |
+| 两引擎独立及退出 | Godot store/error 不禁用 ComfyUI、ComfyUI 离线不妨碍 Godot 独立 available。新增逐一注入 remote/admin/monitor/Godot 清理异常的用例，确认两引擎均执行清理且安全状态已撤销。 |
+| MCP / 下载 | 原 capture/script 信封、状态/等待、PNG 下载保留；新增真实回环 HTTP 测试验证 Godot 打开/读取产物期间撤销后既不发 200 也不发产物字节。 |
+| 安装包 | 实际临时安装后逐字核对 Godot adapter、HTTP adapter、截图脚本；用 Python `-I` 从已安装目录导入两模块成功。卸载仍使用最新 PR #5 身份复验。 |
+| Windows | native_control/native_process/native_blender/native_godot/native_unity 与新基线逐字一致；原 Windows mock 测试保留，全套通过不等于 Windows 实机通过。 |
+
+额外静态比对：对 `ComfyProcess`、Tailscale/peer 校验、LaunchAgent 操作/校验、RuntimeSecurity、ClosingServer 和 uninstall 共 9 个 AST 节点比较，均与新基线一致；PR #5 两份安全测试逐字一致。Godot 核心 adapter、MCP client 和 Toolkit Godot 状态模块相对原 HEAD 保留。服务共同清理的唯一兼容改动是添加内层 Godot close，并保证 ComfyUI stop 不被跳过。
+
+验证命令及结果：
+
+```sh
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_macos_godot.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+git diff --check
+python3 scripts/check.py
+```
+
+- Godot 专项：**32 通过，0 失败**（原 30 项完整保留，新增 2 项含多个清理/撤销子用例）。
+- 全部 Python Bridge：**229 项，226 通过，0 失败，3 Windows 专属跳过**。
+- 全部 Toolkit Node：**80 项，79 通过，0 失败，1 Windows 原生探针跳过**。
+- `git diff --check` 通过；`scripts/check.py` 检查 **172** 个源码/文档文件通过。原 malformed workflow 夹具预期日志不表示测试失败。
+
+**Mock 与真实验收。** 全部 Godot/Tailscale/ComfyUI/launchctl/信号操作仍使用 Mock、临时项目、合成 PNG 或回环测试服务；未读取真实凭据、启动用户 Godot、执行项目脚本、修改用户项目、连接 VPS、启动真实 GPU 或安装真实服务。真实 Mac 图形/驱动/权限、信号/LaunchAgent、Tailscale 回包和 Windows 原生验收仍待人工授权。项目代码不是沙箱；进程组不等同 Job Objects；轮询和用户态撤销不能撤回已发送数据，也不构成内核原子隔离。同步不会消除这些已记录限制。
+
+## 17. PR #6 Godot MCP 必填授权修复（2026-11-05）
+
+工作区开始时干净；fetch 后本地与 `origin/feature/macos-godot` 均为 `87841d18a2092869bbe90dfe42d9866f7bcb1f2b`。本次只更新原 Godot 分支及现有 Draft PR #6，不改 main、不新建 PR、不合并。
+
+生产修改仅涉及 `plugin/client.py` 的两处 schema：`capture_scene.required` 改为 `project_id, authorized`，`run_project_script.required` 改为 `project_id, script, authorized`。`godot_operation` 原来的 `project_id, operation, authorized` 保持原样。三个工具均继续声明 authorized 为 boolean，无默认授权值，也不把 false 转换为 true。
+
+MCP 的 `check_args` 在调用客户端前拒绝缺少 required 字段和非布尔值。macOS 后端仍独立要求 `authorized is True` 及本地 `allow_scripts is True`；即使绕过 MCP schema 直接调用 Bridge，缺少 authorized 或 false 也必须拒绝。未修改后端、任务协议、进程或安全逻辑。
+
+**Windows 兼容性：** 共享 MCP schema 的变化也适用于 Windows，旧工具调用须显式提供 authorized（授权执行使用 true），省略字段不再通过 MCP。该字段仍位于任务信封顶层，不混入 Godot 参数。Windows 后端的网络隔离、项目脚本许可和 Job Objects 策略未改，旧 HTTP 协议仍保留。测试通过生产 MCP 调度和原 Windows NativeControl，验证显式 true 能正常排队，但不能绕过未就绪的网络隔离或被禁用的项目脚本权限；worker 使用 Mock，不执行 Windows/Godot 进程。`godot_operation` 仍保持其原 macOS 支持范围，没有新增 Windows 操作。
+
+**新增证据：** `test_godot_mcp_schema.py` 共 5 项，验证实际 `tools/list` 暴露的三个 required/boolean schema、三个工具缺少授权时在 stdio MCP 分发前拒绝、非布尔值拒绝、true/false 原样传递，以及 Windows 正常调用和安全门槛兼容。扩展原 Godot 回环 HTTP 用例，对三个工具分别验证缺少 authorized 和 authorized=false；拒绝后任务数和 Mock Popen 调用数不变。通过逐字比对确认 Windows native_control/native_process/native_script 和 macOS Godot 后端未修改，AST 比对确认 godot_operation 定义不变。
+
+执行命令：
+
+```sh
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_godot_mcp_schema.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_macos_godot.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+git diff --check
+python3 scripts/check.py
+```
+
+全部使用内存 MCP、临时合成项目、Mock worker/Popen 和回环测试服务。没有启动真实 Godot、执行用户脚本、连接真实 VPS、读取真实 Token 或改变系统权限。此修复不构成真实 Mac/Windows 验收，先前记录的沙箱、进程组及实机验证限制继续存在。
+
+最终结果：MCP schema/兼容性专项 **5/5 通过**；Godot 专项 **32/32 通过**；全部 Python Bridge **234 项，231 通过、0 失败、3 Windows 专属跳过**；全部 Toolkit Node **80 项，79 通过、0 失败、1 Windows 原生探针跳过**。`git diff --check` 和 `scripts/check.py`（173 个源码/文档文件）通过。原 malformed workflow 夹具日志属于预期异常，不表示测试失败；Windows 跳过项不计为实机通过。

@@ -211,6 +211,13 @@ class Fixture(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
         result = subprocess.run([sys.executable, '-I', str(self.platform.root / 'app/macos_service.py'), '--help'], capture_output=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
+        app = self.platform.root / 'app'
+        for relative in ('native_godot.gd', 'bridge_platform/macos_godot.py', 'bridge_platform/macos_godot_http.py'):
+            self.assertEqual((app / relative).read_bytes(), (SOURCE / relative).read_bytes())
+        result = subprocess.run([sys.executable, '-I', '-c',
+            'import sys; sys.path.insert(0, sys.argv[1]); from bridge_platform.macos_godot import GodotControl; from bridge_platform.macos_godot_http import handle_native',
+            str(app)], capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_config_permissions_token_and_endpoint_changes_rejected(self):
         self.installed()

@@ -12,13 +12,15 @@ sys.path.insert(0, str(SOURCE))
 from bridge_platform.macos import (MacOSPlatform, LABEL, environment, discover_python,
     validate_comfy, probe_python, private_dir, private_path, write_private, tail_ip, require_user)
 
-FILES = ['bridge.py', 'comfy_startup.py', 'workflow_library.py', 'job_reuse.py', 'remote_privacy.py', 'macos_service.py']
+FILES = ['bridge.py', 'comfy_startup.py', 'workflow_library.py', 'job_reuse.py', 'remote_privacy.py', 'macos_service.py', 'native_godot.gd']
 
 
 def plan(settings, adapter):
-    allowed = {'comfy_root', 'comfy_python', 'input_directory', 'output_directory', 'workflow_dirs', 'listen', 'allowed_peers', 'tailscale'}
+    allowed = {'comfy_root', 'comfy_python', 'input_directory', 'output_directory', 'workflow_dirs', 'listen', 'allowed_peers', 'tailscale', 'native'}
     if set(settings) - allowed:
-        raise ValueError('Unknown setting. Only ComfyUI and Tailscale settings are supported.')
+        raise ValueError('Unknown setting. Only ComfyUI, Godot and Tailscale settings are supported.')
+    from bridge_platform.macos_godot import validate_settings
+    validate_settings(settings.get('native') or {})
     root = validate_comfy(settings['comfy_root'])
     python = discover_python(root, settings.get('comfy_python'))
     inputs = Path(settings.get('input_directory', root / 'input')).expanduser().resolve(strict=True)
@@ -35,7 +37,7 @@ def plan(settings, adapter):
         raise ValueError('An explicit peer allowlist is required.')
     for peer in peers:
         tail_ip(peer)
-    return {'platform': 'darwin', 'data_dir': str(adapter.root), 'listen': listen,
+    return {**({'native': settings['native']} if settings.get('native') else {}), 'platform': 'darwin', 'data_dir': str(adapter.root), 'listen': listen,
         'allowed_peers': peers, 'tailscale': tailscale, 'port': 18772, 'admin_port': 18773,
         'comfy_url': 'http://127.0.0.1:8188', 'workflow_dirs': [str(p) for p in workflows],
         'comfy_startup': {'enabled': True, 'root': str(root), 'python': python,
@@ -62,7 +64,7 @@ def install(config, adapter, bridge_python=None):
         private_dir(directory)
     for name in FILES:
         write_private(adapter.root / 'app' / name, (SOURCE / name).read_bytes())
-    for name in ('__init__.py', 'base.py', 'macos.py', 'windows.py'):
+    for name in ('__init__.py', 'base.py', 'macos.py', 'macos_godot.py', 'macos_godot_http.py', 'windows.py'):
         write_private(adapter.root / 'app/bridge_platform' / name, (SOURCE / 'bridge_platform' / name).read_bytes())
     token = secrets.token_hex(32)
     write_private(adapter.root / 'token', token.encode())
@@ -112,14 +114,19 @@ def uninstall(adapter):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['install', 'start', 'stop', 'status', 'logs', 'uninstall'])
+    parser.add_argument('action', choices=['install', 'start', 'stop', 'status', 'logs', 'uninstall', 'discover-godot'])
     parser.add_argument('--settings', help='JSON settings; no token. Omit to choose paths interactively.')
+    parser.add_argument('--godot-search-dir', action='append', help='Additional installed-app search directory (discovery only).')
+    parser.add_argument('--godot-executable', help='Explicit app or executable candidate (discovery only).')
     parser.add_argument('--confirm', action='store_true', help='Apply the printed install/uninstall preview.')
     args = parser.parse_args()
     try:
         environment()
         adapter = MacOSPlatform()
-        if args.action == 'install':
+        if args.action == 'discover-godot':
+            from bridge_platform.macos_godot import discover
+            print(json.dumps({'candidates': discover(args.godot_search_dir, args.godot_executable), 'authorized': False}))
+        elif args.action == 'install':
             if args.settings:
                 settings = json.loads(Path(args.settings).read_text())
             else:
@@ -128,8 +135,8 @@ def main():
                     'listen': input('This Mac Tailscale IPv4: ').strip(),
                     'allowed_peers': input('Approved peer Tailscale IPv4 addresses, comma-separated: ').strip().split(',')}
             config = plan(settings, adapter)
-            print('Preview: use the selected trusted ComfyUI/Python; probe dependencies and MPS; create private bridge app/config/token and client export; register a user LaunchAgent. ComfyUI starts only after a local Start action. Custom/API nodes are disabled. No models, environments or network rules will be installed.')
-            print(json.dumps({k: v for k, v in config.items() if k in ('comfy_startup', 'workflow_dirs')}, indent=2))
+            print('Preview: use the selected trusted ComfyUI/Python; probe dependencies and MPS; create private bridge app/config/token and client export; register a user LaunchAgent. ComfyUI starts only after a local Start action. Custom/API nodes are disabled. Optional Godot settings authorize only the selected executable; each project task still requires explicit user authorization. No Godot, models, environments or network rules will be installed.')
+            print(json.dumps({k: v for k, v in config.items() if k in ('comfy_startup', 'workflow_dirs', 'native')}, indent=2))
             print('Destinations: ~/Library/Application Support/LocalGpuBridge, ~/Library/Logs/LocalGpuBridge, ~/Library/Caches/LocalGpuBridge, ~/Library/LaunchAgents/' + LABEL + '.plist')
             if not args.confirm:
                 print('Preview only. Review selected trusted code, then repeat with --confirm.')
