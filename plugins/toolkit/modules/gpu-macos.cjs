@@ -40,14 +40,20 @@ class MacGpu {
     const valid=value.platform==='darwin'&&godotChecks.every(k=>source.checks?.[k]===true);
     godot={state:['available','running'].includes(source.state)&&!valid?'error':source.state,checks:source.checks};
    }
+   const unitySource=value.unity;let unity={state:'unsupported'};
+   if(unitySource&&['installed','available','running','unsupported','error'].includes(unitySource.state)){
+    const valid=value.platform==='darwin'&&godotChecks.every(k=>unitySource.checks?.[k]===true);
+    const running=valid&&['editor_api','metal','graphics'].every(k=>unitySource.checks?.[k]===true);
+    unity={state:(unitySource.state==='available'&&!valid)||(unitySource.state==='running'&&!running)?'error':unitySource.state,checks:unitySource.checks};
+   }
    const blenderSource=value.blender;let blender={state:'unsupported'};
    if(blenderSource&&['installed','available','running','unsupported','error'].includes(blenderSource.state)){
     const valid=value.platform==='darwin'&&godotChecks.every(k=>blenderSource.checks?.[k]===true);
     blender={state:['available','running'].includes(blenderSource.state)&&!valid?'error':blenderSource.state,checks:blenderSource.checks};
    }
    const comfyui={state:online?'running':value.checks?.installed===true?'installed':'error'};
-   return {online,status:online?'ready':'offline',capability:'comfyui',checks:value.checks,godot,blender,comfyui};
-  }catch{return {online:false,status:'offline',capability:'comfyui',godot:{state:'error'},blender:{state:'error'},comfyui:{state:'error'}};}
+   return {online,status:online?'ready':'offline',capability:'comfyui',checks:value.checks,godot,blender,unity,comfyui};
+  }catch{return {online:false,status:'offline',capability:'comfyui',unity:{state:'error'},godot:{state:'error'},blender:{state:'error'},comfyui:{state:'error'}};}
  }
  async open(){await this.request();return {url,ready:(await this.status()).online};}
 }

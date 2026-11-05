@@ -133,6 +133,7 @@ def health(bridge, process):
     api_healthy = all(v for k, v in checks.items() if k != 'comfyui')
     result['godot'] = bridge.native.status(api_healthy) if bridge.native else {'state': 'unsupported', 'checks': {}}
     result['blender'] = {'state': 'unsupported', 'checks': {}}
+    result['unity'] = {'state': 'unsupported', 'checks': {}}
     for engine in result['godot'].pop('engines', []):
         result[engine['engine']] = engine
     result['comfyui'] = {'state': 'running' if result['ready'] else 'installed' if checks['installed'] else 'error', 'checks': checks}

@@ -535,3 +535,51 @@ python3 scripts/check.py
 ```
 
 共享 worker 合成测试直接执行真实业务函数而非只匹配源码；macOS 安装文件在临时目录用宿主 Python `-I` 验证可导入且不加载 Windows native_process/native_control。native_process.py、bridge.py、两份阶段 4 安全测试保持基线逐字不变。全部 Python 套件包含原 Windows 逻辑测试，跳过项不计作 Windows 实机通过。既有 malformed workflow 夹具的预期异常日志不表示失败。
+
+## 19. 阶段 5C Unity 审计（2026-11-05）
+
+起始工作区干净；fetch 和 GitHub PR #7 元数据确认本地、远端 `feature/macos-blender` 及 PR HEAD 均为 `402f36f11fdc6a2f975d2d9474c3606ea1894d9c`。从该分支创建 `feature/macos-unity`，Draft PR base 为 `feature/macos-blender`；不修改 main、不合并。
+
+| 文件复用清单 | 审计与处理 |
+| --- | --- |
+| native_unity.py / native_unity_commands.py | Windows 启动包含 -force-d3d11、进程工厂/Job Objects；CLI 命令带 Windows creationflags。保留逐字不改 |
+| native_control.py / native_process.py | Windows Job Objects、ctypes、PowerShell、防火墙和原进程行为不用于 Mac；逐字不改 |
+| scripts/install-unity-bridge.py / docs/unity.md | Windows `.exe` 专用副本、LOCALAPPDATA、安装路径和 PowerShell 流程保留；Unity 路径无直接 Registry 读取，Mac 不使用 Windows 安装器 |
+| bridge.py / plugin/client.py | 复用 Unity 四工具和 task/artifact；新增必填授权信封。Windows dispatcher 只消费新字段，显式 false 拒绝，旧 HTTP 和 native guard 保留 |
+| macos_godot.py / macos_blender.py | 复用 canonical/文件描述符/私有任务持久化/取消/PNG/hash/脱敏/排他发布；仅扩展本地配置白名单 |
+| macos_native.py / macos_godot_http.py / macos_service.py | 独立 Unity store、owner 分发、HTTP 路由和健康状态；三引擎 finally 清理互不阻断 |
+| 新 macos_unity.py / OrcaUnityBridge.cs | 固定 Editor API 白名单，项目内手动安装且内容核验的扩展；本实例 private spool + session/PID/project/version 心跳 |
+| Toolkit GPU / Mac 安装清单 | 四引擎独立状态，running 增加 Editor API/Metal/graphics 检查；打包扩展但不复制进用户项目 |
+
+原 Pipeline 源码未随仓库提供；不通过未审计动态目录放行任意工具。复用外层 MCP 接口，Mac 内层采用固定扩展，不声称官方 Pipeline 工具目录完全兼容。详细操作、配置、版本和限制见实施文档第 11 节。
+
+新增 Mock 专项覆盖：Hub/Editor 元数据发现、用户路径、arm64/权限/版本/OS、ProjectVersion 精确匹配、启动参数及 D3D 拒绝、Metal/渲染管线、API 心跳身份/过期、扩展缺失/变更、MCP boolean 授权和实际回环、GameObject/Transform/组件/Inspector、Scene 新文件保存、Play、合成截图/hash/下载篡改、Console 脱敏、受限资产、路径/链接/大小/项目 inode、外部锁、不接管历史进程、退出码/超时/取消、重启 outcome_unknown、引擎独立、Windows 原工具/参数兼容。C# 源码检查只验证固定 API 和拒绝面，**不算 Unity 编译/运行测试**。
+
+旧 Godot 配置测试由“Unity key 全部拒绝”改为“未知 unity_cli_executable 和相对 Unity 路径拒绝”；没有删掉脚本授权/路径检查。仅 Godot control 的 HTTP 夹具仍明确返回 Unity unsupported。全量套件包含原 Windows Unity mock 测试和已有临时安装导入验证，不把平台跳过算通过。
+
+人工验收必须在 ChatGPT 审查和人工批准后进行：专用可信项目副本、匹配版本、手动扩展安装及编译；真实 Metal/Built-in/URP/HDRP、Game View、Play/domain reload、Scene 暂存/排他发布、许可/Preferences/TCC/Gatekeeper；真实信号和 Bridge 重启/遗留进程；四引擎独立性、VPS MCP 和 Windows 原生回归。未运行任何真实 Unity/Godot/Blender/ComfyUI、未修改真实用户项目/Preferences、未安装或下载模块、未部署服务。
+
+保留问题：当前仅稳定 Unity 6000.0、arm64、完整版本匹配；URP/HDRP manifest 仅 17.0.x；不开放任意组件/Inspector 属性或通用资产写入。Game View 需 Play Mode 和可渲染帧；Console 仅扩展加载后。Scene 暂存及 `.meta` 保留人工清理。项目 C# 非沙箱、Mac 进程组非 Job Objects、原始应用日志丢弃。真实 C# 编译及 Editor/Metal 均待验收，Mock 通过不能替代这些项目。
+
+### 阶段 5C 离线验证结果
+
+| 检查 | 结果 |
+| --- | --- |
+| Unity 专项（新增 34 + 原 Windows 9） | 43 通过 |
+| 全部 Python Bridge | 298 项，295 通过、0 失败、3 Windows 专属跳过 |
+| Blender / Godot / ComfyUI / macOS 安全专项 | 140 通过 |
+| 全部 Toolkit Node | 82 项，81 通过、0 失败、1 Windows 原生探针跳过 |
+| git diff --check | 通过 |
+| python3 scripts/check.py | 181 个源码/文档文件通过 |
+| 敏感信息扫描 | 变更中无真实凭据、本机用户路径；IP 仅合成文档/回环测试值 |
+
+```sh
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*unity*.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+PYTHONPATH=services/local-gpu-bridge python3 -m unittest test_macos_blender test_blender_tasks test_blender_vrm test_macos_godot test_godot_mcp_schema test_macos_bridge test_macos_security test_macos_security_edges test_comfy_startup test_comfy_history
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+git diff --check
+python3 scripts/check.py
+```
+
+全量套件中 malformed workflow 的预期异常日志和既有 ResourceWarning 不是测试失败。上述通过数不包含平台跳过；未运行真实 Unity 编译或 GPU。Windows native 四文件、macOS Blender 主 adapter、ComfyUI 两份阶段 4 安全测试与基线逐字一致。存储/安装导入为临时目录，生产测试结果未写入仓库。

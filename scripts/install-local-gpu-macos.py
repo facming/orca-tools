@@ -12,7 +12,7 @@ sys.path.insert(0, str(SOURCE))
 from bridge_platform.macos import (MacOSPlatform, LABEL, environment, discover_python,
     validate_comfy, probe_python, private_dir, private_path, write_private, tail_ip, require_user)
 
-FILES = ['bridge.py', 'comfy_startup.py', 'workflow_library.py', 'job_reuse.py', 'remote_privacy.py', 'macos_service.py', 'native_godot.gd', 'native_blender.py', 'native_blender_validation.py', 'native_blender_output.py', 'native_blender_vrm.py', 'native_blender_metal.py', 'native_script.py']
+FILES = ['bridge.py', 'comfy_startup.py', 'workflow_library.py', 'job_reuse.py', 'remote_privacy.py', 'macos_service.py', 'native_godot.gd', 'native_blender.py', 'native_blender_validation.py', 'native_blender_output.py', 'native_blender_vrm.py', 'native_blender_metal.py', 'native_script.py', 'OrcaUnityBridge.cs']
 
 
 def plan(settings, adapter):
@@ -64,7 +64,7 @@ def install(config, adapter, bridge_python=None):
         private_dir(directory)
     for name in FILES:
         write_private(adapter.root / 'app' / name, (SOURCE / name).read_bytes())
-    for name in ('__init__.py', 'base.py', 'macos.py', 'macos_godot.py', 'macos_godot_http.py', 'macos_blender.py', 'macos_native.py', 'windows.py'):
+    for name in ('__init__.py', 'base.py', 'macos.py', 'macos_godot.py', 'macos_godot_http.py', 'macos_blender.py', 'macos_unity.py', 'macos_native.py', 'windows.py'):
         write_private(adapter.root / 'app/bridge_platform' / name, (SOURCE / 'bridge_platform' / name).read_bytes())
     token = secrets.token_hex(32)
     write_private(adapter.root / 'token', token.encode())

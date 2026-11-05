@@ -9,6 +9,11 @@ def handle_native(handler, bridge, route, security=None):
         if native is None:
             raise Unsupported('unsupported: configure Godot locally first.')
         method = handler.command
+        if method == 'POST' and route in ('/v1/unity/start', '/v1/unity/stop', '/v1/unity/tools', '/v1/unity/call'):
+            unity = getattr(native, 'unity', None)
+            if unity is None:
+                raise Unsupported('unsupported: Unity is not configured.')
+            return handler.send_json(200, getattr(unity, route.rsplit('/', 1)[1])(**handler.body()))
         if method == 'GET' and route == '/v1/native/status':
             return handler.send_json(200, native.status())
         if method == 'GET' and route == '/v1/native/projects':

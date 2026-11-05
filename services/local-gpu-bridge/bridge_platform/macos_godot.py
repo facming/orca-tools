@@ -129,7 +129,7 @@ def child_env(home):
 
 
 def validate_settings(settings):
-    if not isinstance(settings, dict) or set(settings) - {'godot_executable', 'blender_executable', 'blender_device', 'projects'}:
+    if not isinstance(settings, dict) or set(settings) - {'godot_executable', 'blender_executable', 'blender_device', 'unity_executable', 'projects'}:
         raise ValueError('Only native executable, device and project settings are supported on macOS.')
     if settings.get('godot_executable') is not None and (not isinstance(settings['godot_executable'], str) or not Path(settings['godot_executable']).is_absolute()):
         raise ValueError('Godot must be explicitly configured with an absolute path.')
@@ -137,12 +137,14 @@ def validate_settings(settings):
         raise ValueError('Blender device must be metal or cpu.')
     if 'blender_executable' in settings and (not isinstance(settings['blender_executable'], str) or not Path(settings['blender_executable']).is_absolute()):
         raise ValueError('Blender needs an absolute selected path.')
+    if 'unity_executable' in settings and (not isinstance(settings['unity_executable'], str) or not Path(settings['unity_executable']).is_absolute()):
+        raise ValueError('Unity needs an absolute selected path.')
     projects = settings.get('projects', [])
     if not isinstance(projects, list) or len(projects) > 100:
         raise ValueError('Invalid approved projects.')
     seen = set()
     for p in projects:
-        if not isinstance(p, dict) or set(p) - {'id', 'name', 'root', 'godot_subdir', 'enabled', 'allow_scripts'}:
+        if not isinstance(p, dict) or set(p) - {'id', 'name', 'root', 'godot_subdir', 'unity_subdir', 'enabled', 'allow_scripts'}:
             raise ValueError('Unexpected Godot project settings.')
         if not isinstance(p.get('id'), str) or not ID.fullmatch(p['id']) or p['id'] in seen:
             raise ValueError('Invalid or duplicate project ID.')
@@ -150,6 +152,7 @@ def validate_settings(settings):
         if not isinstance(p.get('root'), str) or not Path(p['root']).is_absolute():
             raise ValueError('Project root must be explicitly configured.')
         relative(p.get('godot_subdir', ''), empty=True)
+        relative(p.get('unity_subdir', ''), empty=True)
         for key in ('enabled', 'allow_scripts'):
             if key in p and type(p[key]) is not bool:
                 raise ValueError('Project permissions must be boolean.')

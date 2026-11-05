@@ -307,6 +307,11 @@ def make_handler(bridge, security=None):
                 raise ValueError('Access denied.')
             if not isinstance(value, dict): raise ValueError('Expected a JSON object.')
             return value
+        def unity_legacy_body(self):
+            value = self.body()
+            if 'authorized' in value and value.pop('authorized') is not True:
+                raise ValueError('Explicit Unity authorization was denied.')
+            return value
         def handle_request(self):
             self.reply_started = False
             if not self.authorized():
@@ -352,10 +357,10 @@ def make_handler(bridge, security=None):
                         return
                 if self.command == 'GET' and route == '/v1/vroid/tools': return self.send_json(200, bridge.native.vroid.tools())
                 if self.command == 'POST' and route == '/v1/vroid/call': return self.send_json(200, bridge.native.vroid.call(**self.body()))
-                if self.command == 'POST' and route == '/v1/unity/start': return self.send_json(200, bridge.native.unity.start(**self.body()))
-                if self.command == 'POST' and route == '/v1/unity/stop': return self.send_json(200, bridge.native.unity.stop(**self.body()))
-                if self.command == 'POST' and route == '/v1/unity/tools': return self.send_json(200, bridge.native.unity.tools(**self.body()))
-                if self.command == 'POST' and route == '/v1/unity/call': return self.send_json(200, bridge.native.unity.call(**self.body()))
+                if self.command == 'POST' and route == '/v1/unity/start': return self.send_json(200, bridge.native.unity.start(**self.unity_legacy_body()))
+                if self.command == 'POST' and route == '/v1/unity/stop': return self.send_json(200, bridge.native.unity.stop(**self.unity_legacy_body()))
+                if self.command == 'POST' and route == '/v1/unity/tools': return self.send_json(200, bridge.native.unity.tools(**self.unity_legacy_body()))
+                if self.command == 'POST' and route == '/v1/unity/call': return self.send_json(200, bridge.native.unity.call(**self.unity_legacy_body()))
                 if self.command == 'GET' and route == '/v1/tripo/status': return self.send_json(200, bridge.tripo.status())
                 if self.command == 'GET' and route == '/v1/tripo/tools': return self.send_json(200, bridge.tripo.tools())
                 if self.command == 'POST' and route == '/v1/tripo/call': return self.send_json(200, bridge.tripo.call(**self.body()))

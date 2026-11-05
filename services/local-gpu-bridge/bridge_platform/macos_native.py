@@ -3,6 +3,7 @@ import threading
 from . import macos_godot
 from .macos_godot import UnavailableGodot, Unsupported
 from .macos_blender import BlenderControl
+from .macos_unity import UnityControl
 
 
 class UnavailableBlender(UnavailableGodot):
@@ -11,6 +12,14 @@ class UnavailableBlender(UnavailableGodot):
 
     def __getattr__(self, name):
         raise Unsupported('unsupported: Blender storage requires local review; other engines remain independent.')
+
+
+class UnavailableUnity(UnavailableGodot):
+    def __getattr__(self, name):
+        raise Unsupported('unsupported: Unity storage requires local review; other engines remain independent.')
+
+    def status(self, api_healthy=True):
+        return {**super().status(api_healthy), 'engine': 'unity'}
 
 
 class NativeControl:
@@ -24,15 +33,19 @@ class NativeControl:
             self.blender = BlenderControl(config)
         except Exception:
             self.blender = UnavailableBlender()
+        try:
+            self.unity = UnityControl(config)
+        except Exception:
+            self.unity = UnavailableUnity()
 
     def status(self, api_healthy=True):
         # Keep the Godot 5A status envelope while exposing independent engines.
         godot = self.godot.status(api_healthy)
-        return {**godot, 'engines': [godot, self.blender.status(api_healthy)]}
+        return {**godot, 'engines': [godot, self.blender.status(api_healthy), self.unity.status(api_healthy)]}
 
     def projects(self):
         found = {}
-        for control in (self.godot, self.blender):
+        for control in (self.godot, self.blender, self.unity):
             try:
                 rows = control.projects()
             except Unsupported:
@@ -50,16 +63,16 @@ class NativeControl:
 
     def _queue(self, body):
         engine = body.get('engine')
-        if engine not in ('godot', 'blender'):
+        if engine not in ('godot', 'blender', 'unity'):
             raise Unsupported('unsupported: engine is not exposed on macOS.')
         # A request ID cannot ambiguously refer to both engine stores.
-        other = self.blender if engine == 'godot' else self.godot
-        if body.get('request_id') in getattr(other, '__dict__', {}).get('jobs', {}):
-            raise ValueError('Request ID already used by another engine.')
+        for other in (self.godot, self.blender, self.unity):
+            if other is not getattr(self, engine) and body.get('request_id') in other.__dict__.get('jobs', {}):
+                raise ValueError('Request ID already used by another engine.')
         return getattr(self, engine).queue(body)
 
     def owner(self, ident):
-        owners = [c for c in (self.godot, self.blender) if ident in c.__dict__.get('jobs', {})]
+        owners = [c for c in (self.godot, self.blender, self.unity) if ident in c.__dict__.get('jobs', {})]
         if len(owners) != 1:
             raise ValueError('Unknown or ambiguous task ID.')
         return owners[0]
@@ -91,4 +104,7 @@ class NativeControl:
         try:
             self.godot.close()
         finally:
-            self.blender.close()
+            try:
+                self.blender.close()
+            finally:
+                self.unity.close()
