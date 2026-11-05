@@ -42,7 +42,7 @@ class DownloadManager {
   constructor(options) {
     this.options = options; this.root = options.dataDir; this.jobs = new Map(); this.runs = new Map();
     this.live = new Map(); this.slots = new Semaphore(16); this.closed = false;
-    this.transport = options.transport || new SshTransport(options);
+    this.transport = options.transport || (options.runtime?.platform==='darwin'?new (require('./v3.cjs').V3Transport)(options):new SshTransport(options));
     this.privateFiles=options.runtime?.platform==='darwin';
     if(this.privateFiles){privateDirectory(this.root);privateDirectory(path.join(this.root,'jobs'));}
     else fs.mkdirSync(path.join(this.root, 'jobs'), {recursive: true});
@@ -52,6 +52,7 @@ class DownloadManager {
         if(this.privateFiles)privatePath(path.join(this.root,'jobs',name));
         const job = JSON.parse(fs.readFileSync(path.join(this.root, 'jobs', name), 'utf8'));
         if(this.privateFiles&&(!job||job.id+'.json'!==name||!validRemote(job.source)||!path.isAbsolute(job.destination)||!path.isAbsolute(job.partial)||path.dirname(job.partial)!==path.dirname(job.destination)||!path.basename(job.partial).endsWith('.'+job.id+'.part')||!Number.isInteger(job.concurrency)||job.concurrency<1||job.concurrency>16||!Number.isSafeInteger(job.size)||job.size<0||!Number.isSafeInteger(job.chunk)||job.chunk<1||job.chunk>8*1024*1024||(job.sha256&&!/^[a-f0-9]{64}$/.test(job.sha256))||!Array.isArray(job.done)||job.done.some(i=>!Number.isInteger(i)||i<0||i>=Math.ceil(job.size/job.chunk))))throw Error();
+        if(this.privateFiles&&job.protocol!==3){job.authorizationState='legacy-manual';job.cleanupWarning='Legacy task: manual cleanup required.';}
         if(job.status==='complete'&&job.cleanupWarning)this.options.onConnection?.('error');
         if (job.error) job.error = 'Previous download failed. Check the destination and remote connection before retrying.';
         if (!['complete','cancelled'].includes(job.status)) job.status = 'paused';
@@ -70,11 +71,12 @@ class DownloadManager {
       return {id:job.id, source:job.source, name:job.name, destination:job.destination, status:job.status,
         size:job.size || 0, bytes, speed, percent:job.status==='complete'?100:job.size?Math.min(100,bytes/job.size*100):0,
         concurrency:job.concurrency, connections:live?.ranges.size||0, retries:job.retries||0,
-        error:job.error||null, verified:job.verified||false, cleanupWarning:job.cleanupWarning||null};
+        error:job.error||null, verified:job.verified||false, cleanupWarning:job.cleanupWarning||null,authorizationState:job.authorizationState||null};
     });
   }
   async create({source, folder, concurrency=12}) {
     if (this.closed) throw new ToolkitError('Download manager is closing');
+    this.transport.ensureReady?.();
     if (!validRemote(source))
       throw new ToolkitError('Enter an absolute remote file path');
     if (typeof folder!=='string' || !path.isAbsolute(folder) || folder.length>(this.privateFiles?4096:220)||/[\x00-\x1f]/.test(folder)) throw new ToolkitError('Enter an absolute local folder path');
@@ -86,11 +88,13 @@ class DownloadManager {
     while(fs.existsSync(destination)||[...this.jobs.values()].some(j=>j.destination===destination&&j.status!=='cancelled')) destination=path.join(folder,`${stem} (${++suffix})${ext}`);
     const job={id,source,name:path.basename(destination),destination,partial:path.join(folder,`.${name}.${id}.part`),
       concurrency,chunk:4*1024*1024,status:'preparing',size:0,done:[],retries:0};
+    if(this.privateFiles&&!this.options.transport){job.protocol=3;require('../../config-service/client.cjs').mutate({op:'lease-acquire',task_id:id,target:Object.fromEntries(['environment','sshHost','sshUser','sshPort'].map(k=>[k,this.options[k]]))});}
     this.jobs.set(id,job); this.save(job);
     this.start(job); return this.list().find(j=>j.id===id);
   }
   start(job) {
     if(this.closed)throw new ToolkitError('Download manager is closing');
+    if(this.privateFiles&&!this.options.transport&&job.protocol!==3)throw new ToolkitError('Legacy task: manual cleanup required.');
     if (this.runs.has(job.id)) throw new ToolkitError('This download is already running');
     const controller=new AbortController();
     const promise=this.run(job,controller.signal).catch(error=>{

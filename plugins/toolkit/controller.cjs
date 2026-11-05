@@ -12,7 +12,7 @@ class Controller {
   this.runtime.ensurePrivateDirectory?.(this.root);
   this.accountSnapshot=null;this.accountAvailability='preview';this.accountError='';this.accountRequest=0;
   this.accountPreferences=new AccountPreferences(this.root,{privateFiles:this.runtime.platform==='darwin'});
-  try{this.settings=settings.load(this.root,this.runtime.platform==='darwin'?null:this.runtime.downloadsDir,this.runtime.platform);}catch{this.settings=settings.defaults();this.settingsError='Settings could not be loaded. Original file retained; repair it manually before saving.';}
+  try{this.settings=settings.load(this.root,this.runtime.platform==='darwin'?null:this.runtime.downloadsDir,this.runtime.platform);}catch(e){this.settings=settings.defaults();this.settingsError=e instanceof ToolkitError?e.message:'Settings unavailable; original configuration retained.';}
  }
  async initialize(){await this.configureDownloads();}
  async configureDownloads(){
@@ -29,9 +29,9 @@ class Controller {
  }
  async update(value){
   if(this.loading)throw new ToolkitError('Settings update is in progress.');
+  if(this.settingsError)throw new ToolkitError(this.settingsError);
   const next=settings.validate(value);
   this.loading=(async()=>{
-   const changed=JSON.stringify(next.downloads)!==JSON.stringify(this.settings.downloads);
    // Never silently move a live/resumable task to another server.
    const old=this.settings.downloads;
    const changedTarget=['environment','sshHost','sshUser','sshPort'].some(k=>old[k]!==next.downloads[k]);
@@ -44,8 +44,10 @@ class Controller {
     }
     if(jobs.some(j=>!['complete','cancelled'].includes(j.status)||j.cleanupWarning))throw new ToolkitError('Finish or cancel pending downloads and clear temporary access before changing the remote target.');
    }
-   const accountsChanged=JSON.stringify(next.accounts)!==JSON.stringify(this.settings.accounts);
-   this.settings=settings.save(this.root,next,this.settings,this.runtime.platform);this.settingsError='';
+   const saved=settings.save(this.root,next,this.settings,this.runtime.platform);
+   const accountsChanged=JSON.stringify(saved.accounts)!==JSON.stringify(this.settings.accounts);
+   const changed=JSON.stringify(saved.downloads)!==JSON.stringify(this.settings.downloads);
+   this.settings=saved;this.settingsError='';
    if(accountsChanged){this.accountRequest++;this.accountSnapshot=null;this.accountAvailability='preview';this.accountError='';}if(changed)await this.configureDownloads();
   })();
   try{await this.loading;}finally{this.loading=null;}
@@ -54,7 +56,7 @@ class Controller {
  async status(){
   let gpu={online:false};try{gpu=await this.gpu.status();}catch{}
   const preview=this.runtime.platform==='darwin';
-  return {settings:this.settings,error:this.settingsError,modules:{
+  return {settings:this.settings,error:this.settingsError,configService:this.runtime.platform==='darwin'?(this.settingsError?(this.settingsError.includes('migration')?'migration-pending':'not-installed'):'ready'):'json',modules:{
    accounts:{enabled:this.settings.accounts.enabled,status:!this.settings.accounts.enabled?'disabled':preview?this.accountAvailability:this.settings.accounts.environment?'configured':'needs-setup',manualRefresh:preview,error:this.accountError,accountCount:this.accountSnapshot?.accounts.length??null},
    downloads:{enabled:this.settings.downloads.enabled,status:!this.settings.downloads.enabled?'disabled':this.downloadAvailability||'needs-setup',available:!!this.downloads,error:this.downloadError,jobs:this.downloads?.list().length||0},
    gpu:{...(this.runtime.platform==='darwin'?{godot:gpu.godot||{state:'error'}}:{}),enabled:this.settings.gpu.enabled,status:!this.settings.gpu.enabled?'disabled':gpu.online?'ready':'offline'}

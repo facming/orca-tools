@@ -1,0 +1,28 @@
+# Dedicated instance only. Administrator must set ListenAddress, HostKey, PidFile,
+# and ensure the account CANNOT log in via the personal/default SSH instance.
+Port 22222
+ListenAddress 127.0.0.1
+HostKey /etc/orca-download/ssh_host_ed25519_key
+PidFile /run/orca-download/sshd.pid
+AllowUsers orca-download
+AuthorizedKeysFile none
+AuthorizedKeysCommand /opt/orca-download/lookup %t %k
+AuthorizedKeysCommandUser orca-lookup
+AuthenticationMethods publickey
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+PermitEmptyPasswords no
+PermitTTY no
+DisableForwarding yes
+AllowAgentForwarding no
+AllowTcpForwarding no
+AllowStreamLocalForwarding no
+X11Forwarding no
+PermitTunnel no
+PermitUserRC no
+PermitUserEnvironment no
+UsePAM no
+MaxSessions 16
+# No Subsystem: SFTP is not available. The per-key command invokes only dispatch.

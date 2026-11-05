@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
-const {RemoteBrowser}=require('./remote-browser.cjs'),preferences=require('./download-preferences.cjs'),{startServer}=require('./server.cjs');
+const {RemoteBrowser}=require('./remote-browser.cjs'),preferences=require('./download-preferences.cjs').forPlatform('win32'),{startServer}=require('./server.cjs');
 test('remote browser uses a read-only RPC, filters hidden entries and sorts folders first',async()=>{
  const calls=[];const browser=new RemoteBrowser({}, {listProjects:async()=>['/home/worker'],createClient:()=>({isRemote:true,async call(method,params){calls.push({method,params});return {ok:true,_meta:{runtimeId:'remote'},result:{pathFlavor:'posix',resolvedPath:'/home/worker',entries:[{name:'file.mp4',isDirectory:false},{name:'中文目录',isDirectory:true},{name:'.private',isDirectory:false},{name:'../bad',isDirectory:false}]}};}})});
  const value=await browser.list('Server',{directory:'/home/worker'});assert.equal(value.entries.length,2);assert.equal(value.entries[0].isDirectory,true);assert.equal(value.entries[1].path,'/home/worker/file.mp4');assert.deepEqual(calls,[{method:'files.browseServerDir',params:{path:'/home/worker'}}]);assert.equal(value.parent,null);

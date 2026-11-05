@@ -1,0 +1,13 @@
+{
+  "state": "/var/lib/orca-download",
+  "socket": "/run/orca-download/authority.sock",
+  "owners": {"21002": ["/srv/approved-project"]},
+  "reader_uid": 21003,
+  "lookup_uid": 21004,
+  "server_id": "administrator-assigned-server",
+  "endpoint_id": "dedicated-download-ssh",
+  "account_id": "orca-download",
+  "signing_key_id": "receipt-key-1",
+  "dispatcher": "/opt/orca-download/dispatch",
+  "max_export_bytes": 10737418240
+}

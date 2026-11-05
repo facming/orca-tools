@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),os=require('node:os');
-const {DirectoryPicker}=require('./directory-picker.cjs'),{startServer}=require('./server.cjs'),preferences=require('./download-preferences.cjs');
+const {DirectoryPicker}=require('./directory-picker.cjs'),{startServer}=require('./server.cjs'),preferences=require('./download-preferences.cjs').forPlatform('win32');
 function fixture(){const root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-folder-'));const selected=path.join(root,"中文 folder's name");fs.mkdirSync(selected);return {root,selected,clean:()=>fs.rmSync(root,{recursive:true,force:true})};}
 test('native picker passes paths as encoded data and returns Unicode directory',async()=>{const f=fixture();try{
  const initial="C:\\User's files\\中文;$untrusted";let called=false;
@@ -15,11 +15,11 @@ test('cancel and overlapping dialog requests are handled without changing path',
 });
 test('picker rejects invalid responses and preferences failures are reported on macOS and remain nonfatal on Windows',async()=>{const f=fixture();try{
  const picker=new DirectoryPicker({childEnv:{}},{platform:'win32',execute:async()=>({stdout:'{"cancelled":false,"path":"relative"}'})});await assert.rejects(picker.choose(''),/absolute folder/);
- const bad=path.join(f.root,'not-a-directory');fs.writeFileSync(bad,'x');if(process.platform==='darwin'){assert.throws(()=>preferences.rememberFolder(bad,f.selected),/settings/);assert.throws(()=>preferences.defaultFolder(bad,f.root),/settings/);}else{assert.equal(preferences.rememberFolder(bad,f.selected),false);assert.equal(preferences.defaultFolder(bad,f.root),path.join(f.root,'Downloads','Orca'));}
+ const bad=path.join(f.root,'not-a-directory');fs.writeFileSync(bad,'x');assert.equal(preferences.rememberFolder(bad,f.selected),false);assert.equal(preferences.defaultFolder(bad,f.root),path.join(f.root,'Downloads','Orca'));
  }finally{f.clean();}});
 test('HTTP directory picker requires local authorization and remembers selection across restart',async()=>{const f=fixture();let service;try{
  let cancelled=false,calls=0;
- const options={port:0,dataDir:path.join(f.root,'settings'),runtime:{home:f.root,local:f.root,childEnv:{}},
+ const options={port:0,dataDir:path.join(f.root,'settings'),runtime:{platform:'win32',home:f.root,local:f.root,childEnv:{}},
   directoryPicker:{async choose(){calls++;return cancelled?{cancelled:true}:{cancelled:false,path:f.selected};}},
   gpu:{async status(){return {online:false};}},createDownloads:()=>({list:()=>[],close:async()=>{}})};
  service=await startServer(options);

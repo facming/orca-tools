@@ -1,0 +1,64 @@
+'use strict';
+const test=require('node:test'),assert=require('node:assert/strict'),crypto=require('node:crypto'),fs=require('node:fs'),os=require('node:os'),path=require('node:path');
+const {V3Transport,verify,canonical}=require('./v3.cjs'),{SshTransport}=require('./transport.cjs');
+const config=require('../../config-service/client.cjs');
+function fixture(t){
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'orca-v3-'));t.after(()=>fs.rmSync(root,{force:true,recursive:true}));
+ const {privateKey,publicKey}=crypto.generateKeyPairSync('ed25519');
+ const trust={server_id:'server',endpoint_id:'endpoint',account_id:'reader',authority_epoch:'current',signing_key_id:'one',receiptKey:publicKey.export({type:'spki',format:'pem'})};
+ const tr=Object.assign(Object.create(V3Transport.prototype),{dataDir:root,trust});
+ const job={id:'a'.repeat(32),protocol:3,publicKeyHash:'b'.repeat(64),authGeneration:'c'.repeat(32),trust};
+ const expected={...tr.bindings(job),auth_generation:job.authGeneration,action:'revoke',state:'REVOKED',request_id:'request',client_nonce:'d'.repeat(64),read_barrier:'DRAINED'};
+ const payload={...expected,revocation_commit_seq:'1',issued_at:'1'};
+ const sign=value=>{const raw=Buffer.from(canonical(value));return {payload:raw.toString('base64'),signature:crypto.sign(null,Buffer.concat([Buffer.from('orca-download-revocation-v3\0'),raw]),privateKey).toString('base64')};};
+ fs.mkdirSync(path.join(root,'jobs'),{mode:0o700});fs.mkdirSync(path.join(root,'keys'),{mode:0o700});fs.mkdirSync(tr.directory(job),{mode:0o700});
+ for(const name of ['key','key.pub','known_hosts'])fs.writeFileSync(path.join(tr.directory(job),name),'synthetic',{mode:0o600});
+ return {tr,job,trust,payload,expected,sign,key:path.join(tr.directory(job),'key')};
+}
+test('v3 Ed25519 signatures bind every task, endpoint, nonce, epoch and drain field',t=>{
+ const f=fixture(t);assert.deepEqual(verify(f.sign(f.payload),f.trust,f.expected),f.payload);
+ for(const field of Object.keys(f.expected))assert.throws(()=>verify(f.sign({...f.payload,[field]:'wrong'}),f.trust,f.expected),/binding/);
+ const fake=f.sign(f.payload);fake.signature=Buffer.alloc(64).toString('base64');assert.throws(()=>verify(fake,f.trust,f.expected),/signature/);
+ assert.throws(()=>verify(f.sign({...f.payload,extra:'unexpected'}),f.trust,f.expected),/schema/);
+ assert.throws(()=>verify('KEY_REMOVED:'+f.job.id,f.trust,f.expected));
+ assert.throws(()=>verify(f.sign(f.payload),f.trust,{...f.expected,client_nonce:'e'.repeat(64)}),/binding/);
+});
+test('v3 cleanup persists proof before deleting key and releasing target lease',async t=>{
+ const f=fixture(t);let released=false;
+ t.mock.method(config,'mutate',request=>{assert.equal(request.op,'lease-release');assert.ok(fs.existsSync(f.key));const stored=JSON.parse(fs.readFileSync(path.join(f.tr.dataDir,'jobs',f.job.id+'.json')));assert.equal(stored.cleanup_verified,true);released=true;});
+ f.tr.manage=async r=>f.sign({...f.payload,request_id:r.request_id,client_nonce:r.client_nonce});
+ await f.tr.cleanup(f.job);assert.equal(released,true);assert.equal(fs.existsSync(f.key),false);assert.equal(f.job.authorizationState,'revoked');
+});
+test('v3 forged, pending, stale, unreachable, persistence and lease failures retain private key',async t=>{
+ for(const mode of ['forged','pending','stale','unreachable','persist','lease']){
+  const f=fixture(t);f.job.revocationSequence=mode==='stale'?'2':'0';
+  f.tr.manage=async r=>{if(mode==='unreachable')throw Error('offline');if(mode==='pending')return {state:'REVOKING'};return f.sign({...f.payload,request_id:r.request_id,client_nonce:mode==='forged'?'bad':r.client_nonce});};
+  t.mock.method(config,'mutate',()=>{if(mode==='lease')throw Error('unavailable');});
+  if(mode==='persist'){const original=f.tr.persist;f.tr.persist=function(job){if(job.cleanup_verified)throw Error('disk full');return original.call(this,job);};}
+  await assert.rejects(f.tr.cleanup(f.job));assert.ok(fs.existsSync(f.key),mode);
+ }
+});
+test('macOS legacy preparation and both string cleanup paths fail closed',async t=>{
+ const f=fixture(t);const transport=new SshTransport({dataDir:f.tr.dataDir,runtime:{platform:'darwin'},environment:'test',sshHost:'100.64.0.20',sshUser:'reader',sshPort:22});
+ await assert.rejects(transport.prepare(f.job),/v3/);await assert.rejects(transport.cleanup(f.job),/manual/);await assert.rejects(transport.cleanupViaOrca(f.job),/manual/);
+ f.job.protocol=2;await assert.rejects(f.tr.cleanup(f.job),/Legacy/);assert.ok(fs.existsSync(f.key));
+});
+test('canonical proof encoding preserves Unicode consistently with Python',()=>{
+ assert.equal(canonical({source:'/project/中文😀',protocol:3}),'{"protocol":3,"source":"/project/\\u4e2d\\u6587\\ud83d\\ude00"}');
+});
+test('v3 real SSHSIG registration, signed metadata, retry and cleanup against authority SQLite',async t=>{
+ const cp=require('node:child_process'),{promisify}=require('node:util');
+ const root=fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(),'orca-v3-authority-')));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const state=path.join(root,'authority'),dataDir=path.join(root,'local');fs.mkdirSync(state,{mode:0o700});fs.mkdirSync(dataDir,{mode:0o700});fs.mkdirSync(path.join(dataDir,'jobs'),{mode:0o700});
+ const source=path.join(root,'中文.dat');fs.writeFileSync(source,'PAYLOAD');
+ const shared=path.resolve(__dirname,'../../config-service'),authority=path.resolve(__dirname,'../../../../services/download-authorization');
+ const script=`import sys,os\nsys.path[:0]=sys.argv[2:4]\nfrom authority import Authority\nfrom secure_store import loads,dumps\np={'owners':{str(os.getuid()):[sys.argv[4]]},'reader_uid':os.getuid()+1,'lookup_uid':os.getuid()+2,'server_id':'server','endpoint_id':'endpoint','account_id':'reader','signing_key_id':'one','dispatcher':'/opt/orca-download/dispatch'}\ns=Authority(sys.argv[1],p,sys.argv[5]=='init')\ntry:\n print(dumps({'receiptKey':s.verify_key,'authority_epoch':s.meta('epoch')} if sys.argv[5]=='init' else s.handle(os.getuid(),loads(sys.stdin.buffer.read()))))\nfinally:s.close()`;
+ const invoke=(op,r)=>JSON.parse(cp.execFileSync('python3',['-c',script,state,shared,authority,root,op],{input:r?canonical(r):'',encoding:'utf8'}));
+ const trust={...invoke('init'),server_id:'server',endpoint_id:'endpoint',account_id:'reader',signing_key_id:'one',hostKey:'ssh-ed25519 U1lOVEhFVElD',host:'100.64.0.20',port:22,worktree:'path:/test'};
+ const tr=new SshTransport({dataDir,runtime:{platform:'darwin',keygen:'/usr/bin/ssh-keygen',childEnv:{PATH:process.env.PATH}},environment:'test',sshHost:'100.64.0.20',sshUser:'reader',sshPort:22,execute:promisify(cp.execFile),spawn:cp.spawn});Object.setPrototypeOf(tr,V3Transport.prototype);tr.trust=trust;tr.manage=async r=>invoke('request',r);
+ const job={id:crypto.randomUUID().replaceAll('-',''),protocol:3,source};
+ const meta=await tr.prepare(job);assert.equal(meta.size,7);assert.equal(meta.sha256,crypto.createHash('sha256').update('PAYLOAD').digest('hex'));assert.equal(job.authorizationState,'active');
+ assert.deepEqual(await tr.prepare(job),meta);
+ t.mock.method(config,'mutate',()=>({released:job.id}));await tr.cleanup(job);assert.equal(job.cleanup_verified,true);assert.equal(fs.existsSync(path.join(tr.directory(job),'key')),false);
+ assert.equal(invoke('request',{op:'status',task_id:job.id}).state,'REVOKED');
+});

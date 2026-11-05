@@ -1,0 +1,70 @@
+7B-3 validation — 2026-11-05 (Asia/Shanghai)
+Base: PR #12 / 919480467d692da4fca21eff5acdbf721688ad4f
+Synthetic local data only; no production deployment, VPS or user migration.
+
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+  tests 92; pass 91; fail 0; skipped 1 (existing Windows native probe).
+  Includes 6 new v3 tests and real SSHSIG -> authority SQLite -> signed revoke.
+
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+  Ran 301 tests; OK (skipped=3: Windows-only native/Tripo tests).
+
+python3 plugins/toolkit/modules/downloads/test_remote.py
+  PASS exact ranges, command rejection, bounds, changed-source rejection, scoped key cleanup.
+  PASS isolated registration, forced-command restriction, hash and metadata permissions.
+
+python3 plugins/toolkit/modules/downloads/test_hardening.py
+  Ran 13 tests; OK.
+
+python3 -m unittest discover -s plugins/toolkit/config-service -p 'test_*.py'
+  Ran 7 tests; OK.
+
+PYTHONPATH=plugins/toolkit/config-service:services/download-authorization python3 -m unittest discover -s services/download-authorization -p test_authority.py
+  Ran 5 tests; OK.
+
+python3 -m unittest discover -s scripts -p 'test_*.py'
+  Ran 6 tests; OK (skipped=3: existing Windows installer tests).
+
+Temporary Docker build: services/download-authorization/Dockerfile.test
+Run: docker run --rm --network none -v "$PWD:/src:ro" orca-security-test:7b3
+  PASS real UID direct DB/journal/program/signing-key isolation and unauthorized IPC
+  PASS actual dedicated sshd: reads, forced command, shell/PTY/range rejection, host pin change, personal keys independent
+  PASS real live read lease: revoke stays PENDING, new SSH denied, dispatcher ACK permits DRAINED
+  PASS concurrent registration/revocation, durable tombstones and authority restart; revoked keys rejected
+  PASS config actual different UID: DB/journal/WAL/SHM denied; independent process field patches merge
+  PASS offline corruption recovery into new epoch/directory; damaged original retained
+  Additional negative assertions: actual SSH subsystem request and remote forwarding rejected.
+  Real identities: authority=21001, workspace=21002, reader=21003, lookup=21004,
+  unauthorized=21005, config service=21006. Loopback sshd port 22222; no host port.
+
+Native macOS (administrator command run by user; PASS screenshots supplied in chat):
+  sudo /usr/bin/python3 scripts/test-macos-security-isolation.py --client-uid 501
+  PASS macOS native peer UID + designated code requirement: signed bridge accepted, unsigned client rejected
+  PASS macOS real different UID: DB/journal/WAL/SHM write, unlink, rename, hardlink, symlink denied
+  PASS explicit migration and service read; no production installation or user data accessed
+  Service UID=70 (_www), desktop UID=501. Temporary root-owned tree under /private/var/db.
+  Earlier failure: malformed CDHash requirement. Fixed requirement syntax plus preflight
+  codesign validation; switched peer validation to kernel audit token. Two subsequent
+  user runs passed. Ad-hoc signature used for this test, not a production Developer ID.
+
+macOS bundle build (temporary output, ad-hoc test identity):
+  python3 scripts/build-security-bundle.py --output /tmp/orca-security-bundle-7b3-final --signing-identity -
+  Native bridge and identity dylib compile; codesign verification passes; manifest generated.
+  Production installer intentionally rejects this ad-hoc bundle.
+
+python3 plugins/toolkit/reproduce-unresolved-races.py
+  EXIT 1, deliberately retained old-path evidence (NOT counted as a passing test):
+  H-02 final check/rename race reproduced: True
+  H-03 non-cooperating writer lost update reproduced: True
+  BLOCKED: native syscall bindings plus advisory locks are not atomic compare-and-swap.
+  New macOS settings/v3 paths no longer invoke these old write protocols.
+  Windows old protocol and historical personal authorizations remain out of new guarantees.
+
+python3 scripts/check.py and git diff --check
+  PASS syntax/private-runtime/credential scan and whitespace checks (see commit verification).
+
+Limits: no actual power loss, full VFS EIO/short-write/fsync injection, VPS whole-host
+reboot, production Developer ID/notarization/launchd installation, original SSH instance
+policy deployment, or real engine GUI tests. SQLITE_FULL allocation and query_only are
+identified as such, not claimed to be these unperformed fault tests. HIGH findings stay
+OPEN until full acceptance, independent review and human approval.

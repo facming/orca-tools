@@ -360,3 +360,35 @@ Windows 原生能力本轮未测试；历史阶段 1 明确排除了 Windows 实
 扫描只报告文件/类别和数量，不打印命中内容；不扫描用户 Keychain、浏览器 profile 或 SSH 目录。规则包括已知凭据格式、私钥边界、真实本机用户路径、可疑长 token 赋值及运行态私有配置路径；测试中合成值不当作真实泄露，也不把规则未命中当作不存在任何秘密的证明。
 
 本轮审计可提交，发布不可放行。所有合并、系统配置、实机任务和源码修复均留在后续明确授权阶段。
+
+
+## 2026-11-05：阶段 7B-3 实现验收补充（Draft / RELEASE BLOCKED）
+
+以 PR #12 `919480467d692da4fca21eff5acdbf721688ad4f` 为基线，新增可运行实现，
+不覆盖本文早期阶段的历史结论。详见 [架构第 7 节](macos-security-architecture.md)
+和 [安装/恢复手册](macos-security-deployment.md)。
+
+**H-02**：macOS 配置权威已移至独立服务 UID 的 SQLite；运行期 JSON 写入移除。
+具备字段 OCC/ABA、request_id 同事务、迁移精确 bytes/未知数值、备份恢复、新 epoch、
+持久 target lease。真实 macOS UID 70/501 原生签名 IPC 与文件隔离通过（用户运行临时
+sudo harness 并返回 PASS 截图）；Linux 独立 UID、多客户端进程、hot-journal SIGKILL、
+SQLite FULL 回滚和损坏库离线恢复通过。没有生产安装、真实迁移或断电/VFS 全故障验收。
+
+**H-03**：macOS 新下载只用 v3 专用入口；独立 authority/lookup/reader 身份、批准根
+staging、SSH key 持有证明、durable read lease、永久 tombstone 和 Ed25519 回执已实现。
+真实临时 sshd 的认证、forced-command/PTY/命令/host pin 负例、并发注册撤销、PENDING→
+DRAINED、服务重启后拒绝已撤销 key 通过。验签绑定 task/public-key/nonce/epoch/endpoint/
+generation/seq，落盘或验证失败保留 key。旧 macOS 任务仅人工清理，不再使用字符串成功路径。
+Windows 旧 reader 保留，旧竞态复现程序仍 exit 1；不扩大声称历史授权已经安全。
+
+最终回归：Toolkit Node **92 项：91 通过、1 既有 Windows 原生探针跳过、0 失败**；
+Python Bridge **301 项：298 通过、3 既有平台/原生环境跳过、0 失败**；Remote Reader
+两组检查通过；Downloads hardening **13/13**；config-service **7/7**；authority **5/5**；
+安装器回归 **6 项：3 通过、3 既有平台跳过**。v3 的 6 项已含在 Node 总数中。
+原有 JSON-specific 测试改为退役文件不参与运行、服务 API fixture 和 Windows 路径的等价
+断言，没有把安全失败改为 skip。跨 UID 测试使用 OS 身份，不使用权限 Mock。
+
+**H-02/H-03 均保留 HIGH OPEN，发布仍 BLOCKED**：独立原生安全审查、完整故障矩阵、
+Developer ID 发行包、launchd/systemd/全入口 SSH 策略和生产部署审批未完成。
+既有 Accounts/ComfyUI/Godot/Blender/Unity 回归通过不代表真实 GUI/引擎实机验收完成。
+main、真实 VPS、个人 SSH 授权和用户真实配置未改动。

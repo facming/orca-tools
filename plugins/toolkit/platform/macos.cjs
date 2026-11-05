@@ -1,5 +1,7 @@
 'use strict';
 const fs = require('node:fs');
+// macOS configuration is provided exclusively by the isolated config service.
+const configServiceProtocol = 1;
 const {loadRuntimeSdk} = require('../remote-runtime.cjs');
 const path = require('node:path');
 const {execFileSync} = require('node:child_process');
@@ -98,3 +100,5 @@ function macos({platform, execPath, home, childEnv}, options) {
     browser: '/usr/bin/open', explorer: '/usr/bin/open'};
 }
 module.exports = {macos};
+
+module.exports.configServiceProtocol = configServiceProtocol;

@@ -7,7 +7,7 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const tempRoots=[];test.after(()=>{for(const root of tempRoots)fs.rmSync(root,{recursive:true,force:true});});
 function temp(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'orca-mac-download-'));tempRoots.push(root);return root;}
 function runtime(root){const tool=path.join(root,'mock executable');fs.writeFileSync(tool,'',{mode:0o700});return {platform:'darwin',home:root,configDir:path.join(root,'config'),downloadsDir:path.join(root,'state'),cli:tool,ssh:tool+' ssh',keygen:tool+' keygen',childEnv:{HOME:root},loadSdk:()=>({RuntimeClient:class{constructor(){this.isRemote=true;}call(){throw Error('No real RPC');}}})};}
-function transportFixture(t,platform='darwin'){
+function transportFixture(t,platform='win32'){
  const root=temp(t),r=runtime(root);r.platform=platform;const calls=[],states=[],job={id:'a'.repeat(32),source:'/project/中文 file.bin'};
  const meta={size:4,sha256:crypto.createHash('sha256').update('DATA').digest('hex'),hostKey:'ssh-ed25519 U1lOVEhFVElD',fingerprint:[1,2,4,3]};
  let cleanup=false,failCleanup=false,failSsh=false,script='';
@@ -24,8 +24,8 @@ function transportFixture(t,platform='darwin'){
  });
  return {root,r,tr,job,meta,calls,states,get script(){return script;},fail(){failSsh=true;failCleanup=true;},fallback(){failSsh=true;failCleanup=false;}};
 }
-test('macOS and Windows SSH fixtures isolate identities, pin host keys and use bounded reads',macOnly,async t=>{
- for(const platform of ['darwin','win32']){const f=transportFixture(t,platform);await f.tr.prepare(f.job);
+test('Windows legacy SSH fixtures isolate identities, pin host keys and use bounded reads',macOnly,async t=>{
+ for(const platform of ['win32']){const f=transportFixture(t,platform);await f.tr.prepare(f.job);
   const keygen=f.calls.find(c=>c.exe===f.r.keygen);assert.deepEqual(keygen.args,['-q','-t','ed25519','-N','','-f',path.join(f.tr.directory(f.job),'key'),'-C','orca-download:'+f.job.id]);
   const args=f.tr.arguments(f.job);for(const option of ['StrictHostKeyChecking=yes','IdentitiesOnly=yes','BatchMode=yes','IdentityAgent=none','ClearAllForwardings=yes','UpdateHostKeys=no','HostKeyAlias='+f.job.id])assert.ok(args.includes(option));
   assert.deepEqual(args.slice(0,3),['-F',platform==='darwin'?'/dev/null':'NUL','-T']);assert.ok(args.some(a=>a.startsWith('UserKnownHostsFile="')&&a.includes('私有 state')));
@@ -40,7 +40,7 @@ test('macOS and Windows SSH fixtures isolate identities, pin host keys and use b
 });
 test('transport rejects out-of-project paths before keygen, unsafe key files and preserves keys on cleanup failure',macOnly,async t=>{
  const f=transportFixture(t);for(const source of ['/etc/passwd','/project/../etc/passwd','/project2/file'])await assert.rejects(f.tr.prepare({...f.job,source}));assert.equal(f.calls.some(c=>c.exe===f.r.keygen),false);
- await f.tr.prepare(f.job);const key=path.join(f.tr.directory(f.job),'key');fs.chmodSync(key,0o644);assert.throws(()=>f.tr.arguments(f.job),/unsafe/);fs.chmodSync(key,0o600);
+ await f.tr.prepare(f.job);const key=path.join(f.tr.directory(f.job),'key');fs.chmodSync(key,0o644);assert.throws(()=>require('./local-state.cjs').privatePath(key),/unsafe/);fs.chmodSync(key,0o600);
  f.fail();await assert.rejects(f.tr.cleanup(f.job));assert.ok(fs.existsSync(key));f.fallback();await f.tr.cleanup(f.job);assert.ok(!fs.existsSync(key));assert.match(f.script,/m.cleanup\(/);assert.match(f.script,/ORCA_DOWNLOAD_CLEANED/);
 });
 async function settled(m,id){for(let i=0;i<3000;i++){if(!m.runs.has(id))return m.jobs.get(id);await sleep(5);}throw Error('Timeout');}
@@ -128,3 +128,5 @@ test('Downloads UI renders actual task status and configured/error availability 
  assert.equal(nodes.get('connection').textContent,'Downloads error');assert.equal(nodes.get('preview-notice').textContent,'Remote unavailable');assert.equal(nodes.get('downloads').children.length,1);
  state={...state,availability:{status:'needs-setup',available:false},jobs:[]};await vm.runInContext('refresh()',context);assert.equal(nodes.get('start').disabled,true);assert.equal(nodes.get('browse-remote').disabled,true);
 });
+
+require('../../fixtures/config-service.cjs').hooks(test);
