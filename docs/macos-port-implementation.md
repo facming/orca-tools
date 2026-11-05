@@ -2,6 +2,10 @@
 
 本文件配合 [macOS 移植技术方案](macos-port-plan.md) 使用。所有功能必须逐模块验收；不支持的功能明确显示 unsupported，不影响其他模块。
 
+**阶段 7A 集成前审计（2026-11-05）：** 见 [最终集成前审计报告](macos-release-readiness-audit.md)。当前 #1–#9 均为 Open Draft，实际 DAG 为顺序堆叠；#5 两次安全修复及 #6 显式授权修复完整进入 #8。当前无需 rebase，但尚不能发布：真实 Mac/VPS 验收缺失，并发现 MCP 跨 origin 重定向转发 Bearer、Toolkit 通用设置临时文件链接覆盖、远端下载授权清理并发覆盖三项 HIGH。专用 Accounts 偏好已有防护不能推论通用设置同样安全。报告给出逐 PR 整合/回滚方案、测试矩阵和人工验收缺口；本阶段只更新文档，不合并或修复源码，不开始 7B。
+
+以下按阶段保留的实现记录不是当前全产品验收声明。最新四引擎能力与限制以第 7A 报告为集成检查依据：macOS 无 Job Objects/Defender Firewall 完全等价隔离；VRoid/Tripo 继续 unsupported，只整合 #9 审计文档。Windows 共享 MCP 新增必填授权字段，原生 Windows 跳过测试不能写成通过。
+
 ## 1. Node.js 平台 runtime
 
 建议 runtime 工厂统一提供：
