@@ -80,7 +80,7 @@ stdlib must be maintained as part of the installed trusted bundle.
    Unload/rollback does not re-enable desktop JSON writes.
 
 IPC uses two independent code identities. The fixed Bridge verifies the service
-UID, then transfers its original stdin Unix socket using `SCM_RIGHTS`. The service
+UID, then transfers the Host-created Unix socket inherited explicitly as fd 3 using `SCM_RIGHTS`. The service
 checks the Bridge's kernel credentials and designated requirement, obtains the
 original channel's `LOCAL_PEERTOKEN`, and checks that live caller with
 `SecCodeCopyGuestWithAttributes(kSecGuestAttributeAudit)` / `SecCodeCheckValidity`.
@@ -88,7 +88,9 @@ It reads the JSON **from that same original channel**, not from a Bridge-supplie
 copy. A claimed PID, UID, executable path, requirement, name or audit token in JSON
 has no authority. Plain pipes/files, missing/extra/truncated FDs, direct unsigned
 clients and signed Bridges launched by unapproved programs fail before dispatch.
-The Node client uses its native socketpair stdin, with a bounded newline frame.
+The sealed main process must create the socketpair through an in-process native binding,
+pass the original endpoint as child fd 3, and retain its endpoint through the reply.
+Bridge stdin is ignored. See [the Host API design](toolkit-host-api-design.md).
 
 Production enrollment additionally requires a root-protected, resource-sealed
 Developer ID app, hardened runtime, no debugger/library-validation/DYLD/unsigned

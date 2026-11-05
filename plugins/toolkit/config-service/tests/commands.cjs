@@ -9,13 +9,17 @@ const {METHOD}=require('../host-client.cjs');
  const [caller,bridge,impostor,phase]=process.argv.slice(2),root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-host-contract-'));
  const runtime={platform:'darwin',home:root,configDir:root,downloadsDir:path.join(root,'downloads'),openUrl:async()=>{}};
  const commands=new Map();let service,principal=caller,granted=true,calls=0;
- const session=Object.freeze({fixture:true}),{createHostHandler}=require('../host-handler.cjs');
- const handler=createHostHandler(value=>granted&&value===session),originalSpawn=cp.spawn;
- cp.spawn=(file,args,options)=>{
-  assert.equal(file,'/Library/PrivilegedHelperTools/OrcaToolkit/config-bridge');assert.deepEqual(args,[]);assert.deepEqual(options.env,{PATH:'/usr/bin:/bin'});
-  return originalSpawn(principal,[],options); // fixture-only signed channel creator
+ // This positive fixture is a native program, not an Electron main process.
+ const handler=async envelope=>{
+  if(!granted)return {ok:false,error:'Unauthorized Toolkit configuration session.'};
+  return new Promise(resolve=>{
+   const child=cp.spawn(principal,[],{stdio:['pipe','pipe','ignore']});
+   const chunks=[];child.stdout.on('data',c=>chunks.push(c));
+   child.on('close',()=>{try{resolve(JSON.parse(Buffer.concat(chunks)));}catch{resolve({ok:false,error:'Configuration service unavailable'});}});
+   child.stdin.on('error',()=>{});child.stdin.end(JSON.stringify(envelope.request)+'\n');
+  });
  };
- const host={has:method=>method===METHOD,async call(method,envelope){assert.equal(method,METHOD);calls++;return handler(envelope,session);}};
+ const host={has:method=>method===METHOD,async call(method,envelope){assert.equal(method,METHOD);calls++;return handler(envelope);}};
  const originalRuntime=runtimeModule.createRuntime,originalStart=hub.startServer;
  runtimeModule.createRuntime=()=>runtime;
  hub.startServer=async options=>service=await originalStart({...options,port:0,gpu:{status:async()=>({online:false})},accounts:{}});
@@ -58,11 +62,11 @@ const {METHOD}=require('../host-client.cjs');
   const before=await read();granted=false;await assert.rejects(command({operation:'backup'}),/Unauthorized/);granted=true;
   principal=impostor;await assert.rejects(command(patch(before,['gpu','enabled'],true)),/Unauthorized signed/);principal=caller;
   assert.deepEqual(await read(),before);
-  principal=bridge;await assert.rejects(command(),/Unauthorized signed/);principal=caller;
-  const direct=cp.spawnSync(bridge,[],{input:'{"op":"status"}\n',encoding:'utf8'});assert.equal(JSON.parse(direct.stdout).ok,false);
+  principal=bridge;await assert.rejects(command(),/unavailable/);principal=caller;
+  const direct=cp.spawnSync(bridge,[],{input:'{"op":"status"}\n',encoding:'utf8'});assert.notEqual(direct.status,0);
   const count=calls;await assert.rejects(command({operation:'status',pid:1}),/fields/);await assert.rejects(command({operation:'exec',script:'no'}),/Unknown/);assert.equal(calls,count);
   host.has=()=>false;await assert.rejects(command(),/sealed Host/);assert.equal(calls,count);
   assert.equal(fs.existsSync(path.join(root,'settings.json')),false);
   console.log('PASS: Toolkit command/HTTP -> synthetic native Host -> Bridge -> signed peers -> SQLite; migration, concurrent windows, conflict, restore/retry, unauthorized, no fallback');
- }finally{await plugin.deactivate();cp.spawn=originalSpawn;runtimeModule.createRuntime=originalRuntime;hub.startServer=originalStart;fs.rmSync(root,{recursive:true,force:true});}
+ }finally{await plugin.deactivate();runtimeModule.createRuntime=originalRuntime;hub.startServer=originalStart;fs.rmSync(root,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});

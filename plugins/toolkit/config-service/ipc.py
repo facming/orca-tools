@@ -88,11 +88,11 @@ class Handler(socketserver.StreamRequestHandler):
                     actor = self.server.caller_authorize(caller)
                     stream = channels.enter_context(caller.makefile('rb'))
                 r = receive(stream)
-            if r.get('op') == 'read-range' and hasattr(self.server.store, 'stream_read'):
-                self.server.store.stream_read(actor, r, self.rfile, self.wfile, peer(self.request)[1])
-            else:
-                result = self.server.store.handle(actor, r)
-                send(self.wfile, {'ok': True, 'result': result})
+                if r.get('op') == 'read-range' and hasattr(self.server.store, 'stream_read'):
+                    self.server.store.stream_read(actor, r, self.rfile, self.wfile, peer(self.request)[1])
+                else:
+                    result = self.server.store.handle(actor, r)
+                    send(self.wfile, {'ok': True, 'result': result})
         except (ValueError, PermissionError, KeyError, OSError) as e:
             try:
                 send(self.wfile, {'ok': False, 'error': str(e)[:256]})
@@ -125,8 +125,14 @@ def receive_caller(sock):
         except OSError:
             os.close(duplicate)
             raise
-        caller.settimeout(30)
-        return caller
+        try:
+            if caller.family != socket.AF_UNIX or caller.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE) != socket.SOCK_STREAM:
+                raise PermissionError('Original Unix stream required')
+            caller.settimeout(30)
+            return caller
+        except BaseException:
+            caller.close()
+            raise
     finally:
         for fd in fds:
             os.close(fd)

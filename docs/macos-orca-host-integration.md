@@ -4,6 +4,9 @@
 `b3f8c4f0d98b64bab573c4bd95d01902811f87e6`。
 开发分支 `feature/macos-orca-host-integration`。调查日期 2026-11-05。
 
+> 阶段 7B-6 的版本溯源、显式 FD 3 修正和签名架构以
+> [Toolkit Host API 设计](toolkit-host-api-design.md) 为准。当前仍未启用可信 Host 路由。
+
 ## 调查结论
 
 本仓库包含 Toolkit，**不包含 Orca Host 源码或签名发布流水线**。本机只读检查
@@ -33,7 +36,7 @@ Orca **1.4.249**，没有修改应用包、安装生产服务、迁移真实配�
   worker 中注册或执行。必须传入 Host-owned session authorizer，没有默认放行。
   校验封闭操作 schema 后，以固定路径、空参数和固定环境异步启动 Bridge；
   限制请求/响应大小及超时，没有 path/env/script/PID/requirement 执行入口。
-  stdin 使用换行帧并保持原始 socket 至响应完成；提前 end 会使 macOS 丢失 peer 身份，
+  7B-6 改为 main 内 native socketpair 和显式 fd 3；stdin 为 ignore，原始 socket 保持至响应完成；
   原生测试已覆盖异步 Node 的真实签名拒绝，避免把断连误认为身份认证。
 - SQLite 服务、Bridge SCM_RIGHTS、原始 socket 审计令牌、双重签名/UID 检查和
   生产 enrollment 条件均未放宽。真正创建 Bridge 输入 socket 的必须是获准 Host。
@@ -62,7 +65,7 @@ Orca **1.4.249**，没有修改应用包、安装生产服务、迁移真实配�
    同时迁移 CLI/其他依赖，不能对整个 Electron 打开任意脚本入口以兼容旧 worker。
    明确关闭 RunAsNode、NodeOptions、CLI inspect，打开 ASAR 完整性和 OnlyLoadAppFromAsar；
    保持 hardened runtime，拒绝不安全 entitlements/外部模块注入。
-4. 主进程自己创建 Bridge 的 stdin socket，不能转交 worker 的原始通道（它仍是不可信
+4. 主进程通过 native binding 创建原始 Unix socketpair，并把 bridgeFd 映射到 Bridge fd 3，不能转交 worker 的原始通道（它仍是不可信
    原始调用者），也不能传伪造 PID/UID/token。主进程必须先完成上述授权，否则成为
    confused deputy。服务独立验证 Bridge 和这个主进程的内核 audit token 与确切 CDHash。
 5. 添加签名 opt-in `OrcaToolkitConfigClient=1`，完成 Developer ID、资源/目录保护、

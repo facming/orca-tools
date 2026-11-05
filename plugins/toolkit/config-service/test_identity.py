@@ -59,6 +59,7 @@ class NativeIdentityTests(unittest.TestCase):
         cls.bridge = cls.root / 'config-bridge'
         cls.caller = cls.root / 'orca-caller'
         cls.impostor = cls.root / 'impostor'
+        cls.pipe_caller = cls.root / 'pipe-caller'
         cls.socket_dir = cls.root / 'run'; cls.socket_dir.mkdir()
         # Same-UID transport fixture calls the unchanged production relay. The
         # production main() UID gate remains compiled and is exercised only by
@@ -67,6 +68,7 @@ class NativeIdentityTests(unittest.TestCase):
         for name in (cls.caller, cls.impostor):
             subprocess.run(['cc', '-Wall', '-Wextra', '-Werror', '-DBRIDGE="'+str(cls.bridge)+'"', str(cls.source/'tests/caller.c'), '-o', str(name)], check=True)
             subprocess.run(['codesign', '-s', '-', '-i', 'com.stablyai.orca.toolkit', '--force', str(name)], check=True, capture_output=True)
+        subprocess.run(['cc','-Wall','-Wextra','-Werror','-DORCA_TEST_PIPE','-DBRIDGE=\"'+str(cls.bridge)+'\"',str(cls.source/'tests/caller.c'),'-o',str(cls.pipe_caller)],check=True)
         subprocess.run(['codesign', '-s', '-', '--force', str(cls.bridge)], check=True, capture_output=True)
         dylib = cls.root/'peer.dylib'
         subprocess.run(['cc', '-Wall', '-Wextra', '-Werror', '-dynamiclib', str(cls.source/'peer_identity.c'), '-framework', 'Security', '-framework', 'CoreFoundation', '-o', str(dylib)], check=True)
@@ -118,8 +120,10 @@ class NativeIdentityTests(unittest.TestCase):
         self.assertTrue(json.loads(request('read', namespace='settings')['raw_json'])['gpu']['enabled'])
 
     def test_signed_bridge_is_not_authority(self):
-        reply=self.call(self.bridge, {'op':'status'})  # Python pipe has no caller token
-        self.assertFalse(reply['ok'])
+        result=subprocess.run([str(self.bridge)], input=b'{"op":"status"}\n', capture_output=True, timeout=10)
+        self.assertEqual(result.returncode,78)  # stdin is never the original channel
+        result=subprocess.run([str(self.pipe_caller)],input=b'',capture_output=True,timeout=10)
+        self.assertEqual(result.returncode,78)  # explicit fd 3 must not be a pipe
         reply=self.call(self.impostor, {'op':'status'})  # same UID, real socketpair, wrong signed binary
         self.assertFalse(reply['ok']);self.assertIn('Unauthorized signed', reply['error'])
 
@@ -129,12 +133,51 @@ class NativeIdentityTests(unittest.TestCase):
         self.assertFalse(reply['ok'])
         self.assertEqual(self.store.db.execute('SELECT count(*) FROM previews').fetchone()[0],0)
 
-    def test_node_spawn_sync_channel_has_original_identity(self):
-        script="const cp=require('node:child_process');const r=cp.spawnSync(process.argv[1],[],{input:'{\"op\":\"status\"}\\n',encoding:'utf8'});process.stdout.write(r.stdout);"
-        reply=subprocess.run(['node','-e',script,str(self.bridge)],capture_output=True,text=True,check=True)
-        result=json.loads(reply.stdout)
-        self.assertFalse(result['ok'])
-        self.assertIn('Unauthorized signed',result['error'])
+    def test_node_stdin_cannot_supply_original_channel(self):
+        script="const cp=require('node:child_process');const r=cp.spawnSync(process.argv[1],[],{input:'{\"op\":\"status\"}\\n',encoding:'utf8'});process.exit(r.status);"
+        reply=subprocess.run(['node','-e',script,str(self.bridge)],capture_output=True,text=True)
+        self.assertEqual(reply.returncode,78)
+
+    @unittest.skipUnless(os.environ.get('TOOLKIT_SOCKETPAIR_SOURCE'), 'Set TOOLKIT_SOCKETPAIR_SOURCE to the Orca native binding source')
+    def test_host_handler_explicit_socket_identity_and_async_reply(self):
+        import shutil
+        addon=self.root/'socketpair.node'
+        subprocess.run(['cc','-Wall','-Wextra','-Werror','-bundle','-undefined','dynamic_lookup',
+                        '-I'+os.environ.get('NODE_INCLUDE_DIR','/opt/homebrew/include/node'),
+                        os.environ['TOOLKIT_SOCKETPAIR_SOURCE'],'-o',str(addon)],check=True)
+        script=r"""
+const assert=require('node:assert/strict'),cp=require('node:child_process');
+const original=cp.spawn;
+cp.spawn=(file,args,options)=>{
+ assert.equal(file,'/Library/PrivilegedHelperTools/OrcaToolkit/config-bridge');
+ assert.equal(options.stdio[0],'ignore');assert.equal(typeof options.stdio[3],'number');
+ return original(process.argv[2],args,options);
+};
+const {createHostHandler}=require(process.argv[1]);
+const session={},handler=createHostHandler(s=>s===session,require(process.argv[3]));
+(async()=>{
+ const denied=await handler({version:1,request:{op:'status'}},{});assert.equal(denied.ok,false);
+ const reply=await handler({version:1,request:{op:'status'}},session);
+ if(process.argv[4]==='deny'){assert.equal(reply.ok,false);assert.match(reply.error,/Unauthorized signed/);}
+ else {
+  assert.equal(reply.ok,true,JSON.stringify(reply));assert.equal(reply.result.state,'migration-pending');
+  const raw=JSON.stringify({future:'x'.repeat(260000)});
+  const preview=await handler({version:1,request:{op:'preview',request_id:'b'.repeat(32),sources:{settings:Buffer.from(raw).toString('base64'),'downloads-preferences':null}}},session);
+  assert.equal(preview.ok,true);assert.equal(preview.result.documents.settings.raw_json,raw);
+ }
+ console.log('PASS: explicit in-process socketpair -> fd 3 -> SCM_RIGHTS -> kernel identity -> async reply');
+})().catch(e=>{console.error(e);process.exitCode=1;});
+"""
+        args=['node','-e',script,str(self.source.resolve()/'host-handler.cjs'),str(self.bridge),str(addon)]
+        # Real Node identity is denied under the synthetic native Host policy.
+        result=subprocess.run([*args,'deny'],capture_output=True,text=True,timeout=10)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        # Test-only policy pins this Node binary to exercise the production JS
+        # adapter's successful asynchronous reply. NEVER a production enrollment.
+        self.server.caller_authorize=signed_peer_authorizer(os.getuid(),self.requirement(Path(shutil.which('node')).resolve()),self.library)
+        result=subprocess.run([*args,'allow'],capture_output=True,text=True,timeout=10)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        print(result.stdout.strip())
 
     def test_toolkit_commands_native_contract(self):
         result = subprocess.run(['node', str(self.source/'tests/commands.cjs'), str(self.caller), str(self.bridge), str(self.impostor)], capture_output=True, text=True, timeout=40)
