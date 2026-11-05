@@ -50,6 +50,8 @@ class Fixture(unittest.TestCase):
         self.loaded = False
         def run(argv, **kw):
             self.calls.append(argv)
+            if argv[0] == '/sbin/ifconfig':
+                return subprocess.CompletedProcess(argv, 0, 'utun9: flags=8051\n\tinet ' + SELF + ' netmask 0xffffffff\n', '')
             if 'status' in argv:
                 return subprocess.CompletedProcess(argv, 0, json.dumps(self.state), '')
             if 'print' in argv:
@@ -160,6 +162,9 @@ class Fixture(unittest.TestCase):
         self.assertFalse(self.platform.authorize_peer(self.config, PEER))
 
     def test_launchctl_lifecycle_uses_current_user_no_shell(self):
+        self.installed()
+        self.loaded = False
+        self.calls.clear()
         for action in ['start', 'status', 'stop']: self.platform.launchctl(action)
         self.assertEqual(self.calls[1][1], 'bootstrap')
         self.assertEqual(self.calls[-1][1], 'bootout')
@@ -169,6 +174,7 @@ class Fixture(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'LaunchAgent operation failed'): self.platform.launchctl('start')
 
     def test_loaded_exited_agent_can_restart_after_tailnet_recovers(self):
+        self.installed()
         self.platform.run = Mock(side_effect=[subprocess.CompletedProcess([], 0, 'state = exited'), subprocess.CompletedProcess([], 0)])
         self.platform.launchctl('start')
         self.assertEqual(self.platform.run.call_args.args[0][1], 'kickstart')
@@ -242,7 +248,7 @@ class Fixture(unittest.TestCase):
     def test_process_cpu_flags_stop_timeout_and_external_ownership(self):
         process = ComfyProcess(self.config, self.platform)
         child = Mock(pid=987654); child.poll.return_value = None
-        with patch('comfy_startup.healthy', side_effect=[False, True]), patch('socket.socket') as sock, patch('bridge_platform.macos.probe_python', return_value={'backend': 'cpu', 'cpu_fallback': True}), patch('subprocess.Popen', return_value=child) as spawn:
+        with patch.object(process, 'verify_listener', return_value=True), patch('comfy_startup.healthy', return_value=True), patch('socket.socket') as sock, patch('bridge_platform.macos.probe_python', return_value={'backend': 'cpu', 'cpu_fallback': True}), patch('subprocess.Popen', return_value=child) as spawn:
             sock.return_value.__enter__.return_value.connect_ex.return_value = 1
             self.assertEqual(process.start(timeout=1)['backend'], 'cpu')
             argv = spawn.call_args.args[0]
@@ -253,7 +259,8 @@ class Fixture(unittest.TestCase):
             self.assertNotIn('token', spawn.call_args.kwargs['env'])
         with patch('os.killpg') as kill:
             process.stop(); self.assertEqual(kill.call_args.args[0], child.pid)
-        with patch('comfy_startup.healthy', return_value=True), patch('subprocess.Popen') as spawn:
+        with patch('socket.socket') as sock, patch('subprocess.Popen') as spawn:
+            sock.return_value.__enter__.return_value.connect_ex.return_value = 0
             with self.assertRaisesRegex(ValueError, 'external'): process.start()
             spawn.assert_not_called()
         with patch('comfy_startup.healthy', return_value=False), patch('socket.socket') as sock, patch('bridge_platform.macos.probe_python', return_value={'backend': 'mps', 'cpu_fallback': False}), patch('subprocess.Popen', return_value=child), patch('os.killpg') as kill:
@@ -291,7 +298,10 @@ class ComfyHTTP(unittest.TestCase):
         self.comfy = Server(('127.0.0.1', 0), Comfy)
         threading.Thread(target=self.comfy.serve_forever, daemon=True).start()
         self.addCleanup(lambda: (self.comfy.shutdown(), self.comfy.server_close()))
-        self.platform = MacOSPlatform(self.root, Mock(return_value=subprocess.CompletedProcess([], 0, json.dumps(network()))))
+        def run(argv, **kwargs):
+            output = 'utun9: flags=8051\n\tinet ' + SELF + ' netmask 0xffffffff\n' if argv[0] == '/sbin/ifconfig' else json.dumps(network())
+            return subprocess.CompletedProcess(argv, 0, output)
+        self.platform = MacOSPlatform(self.root, Mock(side_effect=run))
         self.config = {'data_dir': str(self.root), 'token': 'b'*64, 'listen': SELF, 'allowed_peers': [PEER], 'peer_ids': {PEER: 'synthetic-peer'}, 'self_node_id': 'synthetic-self', 'tailscale': '/fixture/never-executed'}
         authorize = self.platform.authorize_peer
         self.platform.authorize_peer = lambda config, peer: authorize(config, PEER) if peer == '127.0.0.1' else False

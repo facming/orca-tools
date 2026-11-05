@@ -19,6 +19,19 @@ LABEL = 'org.orca.local-gpu-bridge'
 TAILNET = ipaddress.ip_network('100.64.0.0/10')
 
 
+def require_user():
+    if os.getuid() == 0 or os.geteuid() == 0 or os.getuid() != os.geteuid():
+        raise ValueError('Bridge requires an unprivileged login user.')
+
+
+def read_token(root):
+    private_path(root, True)
+    token = private_path(Path(root) / 'token').read_text().strip()
+    if len(token) != 64 or any(c not in '0123456789abcdef' for c in token):
+        raise ValueError('Invalid bridge token file.')
+    return token
+
+
 def private_path(path, directory=False):
     path = Path(path)
     info = path.lstat()
@@ -61,6 +74,7 @@ def tail_ip(value):
 
 
 def environment(system=None, machine=None, version=None):
+    require_user()
     if (system or platform.system()) != 'Darwin':
         raise ValueError('This entry point requires macOS.')
     arch = machine or platform.machine()
@@ -135,12 +149,28 @@ class MacOSPlatform(Platform):
                 raise ValueError()
             if config.get('self_node_id') and own.get('ID') != config['self_node_id']:
                 raise ValueError()
+            # Self metadata alone is insufficient: require the address on a
+            # local tunnel interface before binding, and on every later check.
+            interfaces = self.run(['/sbin/ifconfig', '-a'], capture_output=True, text=True, timeout=4, check=True)
+            interface = None
+            local = False
+            for line in interfaces.stdout.splitlines():
+                header = re.match(r'^(\w+):', line)
+                if header:
+                    interface = header[1]
+                address = re.match(r'\s+inet\s+(\S+)', line)
+                if interface and re.fullmatch(r'utun\d+', interface) and address and address[1] == config['listen']:
+                    local = True
+            if not local:
+                raise ValueError()
             return status
         except Exception:
             raise ValueError('Tailscale is offline or the configured address/identity is not local.') from None
 
     def validate_network(self, config):
         tail_ip(config['listen'])
+        if not isinstance(config.get('self_node_id'), str) or not config['self_node_id']:
+            raise ValueError('The installed Tailscale node identity is required.')
         peers = config.get('allowed_peers')
         identities = config.get('peer_ids', {})
         if not isinstance(peers, list) or not peers or len(peers) != len(set(peers)):
@@ -171,6 +201,9 @@ class MacOSPlatform(Platform):
             'StandardErrorPath': str(self.logs / 'launch.log')})
 
     def launchctl(self, action):
+        require_user()
+        if action in ('start', 'stop'):
+            self.validate_launch_agent()
         domain = 'gui/' + str(os.getuid())
         args = {'start': ['bootstrap', domain, str(self.plist)], 'stop': ['bootout', domain + '/' + LABEL],
                 'status': ['print', domain + '/' + LABEL]}[action]
@@ -188,6 +221,18 @@ class MacOSPlatform(Platform):
             raise ValueError('LaunchAgent operation failed; inspect its local status before retrying.')
         return True
 
+    def validate_launch_agent(self):
+        private_path(self.root, True)
+        launcher = json.loads(private_path(self.root / 'launcher.json').read_text())
+        expected = {'platform': 'darwin', 'python': launcher.get('python'), 'label': LABEL,
+                    'manager_url': 'http://127.0.0.1:18773/'}
+        if launcher != expected or not isinstance(launcher['python'], str) or not Path(launcher['python']).is_absolute():
+            raise ValueError('Invalid managed launcher metadata.')
+        value = plistlib.loads(private_path(self.plist).read_bytes())
+        if value != plistlib.loads(self.launch_plist(launcher['python'])):
+            raise ValueError('LaunchAgent is not the managed bridge; refusing operation.')
+        return launcher
+
 
 class ComfyProcess:
     """Own only children started here; never kill an external instance or a saved PID."""
@@ -195,22 +240,51 @@ class ComfyProcess:
         self.config, self.platform = config, platform_adapter
         self.process = None
         self.lock = threading.RLock()
+        self.stopping = threading.Event()
+        self.closed = threading.Event()
         self.backend = {'backend': 'unchecked', 'cpu_fallback': False}
+
+    def verify_listener(self, required=True):
+        """Inspect the actual port before sending HTTP; never adopt another PID."""
+        if not self.process or self.process.poll() is not None:
+            return False
+        try:
+            result = self.platform.run(['/usr/sbin/lsof', '-nP', '-iTCP:8188', '-sTCP:LISTEN', '-Fpn'],
+                                       capture_output=True, text=True, timeout=4)
+            if result.returncode == 1 and not result.stdout:
+                return not required  # Child may still be loading; no HTTP yet.
+            if result.returncode != 0:
+                raise ValueError()
+            pid, listeners = None, []
+            for line in result.stdout.splitlines():
+                if line.startswith('p'):
+                    pid = line[1:]
+                elif line.startswith('n'):
+                    listeners.append((pid, line[1:]))
+            if not listeners or any(item != (str(self.process.pid), '127.0.0.1:8188') for item in listeners):
+                raise ValueError()
+            return True
+        except Exception:
+            self.stop()
+            raise ValueError('ComfyUI listener ownership or loopback binding could not be verified.') from None
 
     def start(self, timeout=300):
         from comfy_startup import launch_spec, healthy
         with self.lock:
+            if self.closed.is_set():
+                raise ValueError('Managed ComfyUI service has stopped.')
+            if self.config.get('comfy_url') != 'http://127.0.0.1:8188':
+                raise ValueError('Managed ComfyUI requires the fixed loopback endpoint.')
+            self.stopping.clear()
             command, cwd, url = launch_spec(self.config)
-            if healthy(url):
-                if not self.process or self.process.poll() is not None:
-                    raise ValueError('ComfyUI port belongs to an external instance; stop it manually before managed startup.')
-                return {'state': 'ready', **self.backend}
             if self.process and self.process.poll() is None:
+                if self.healthy_owned():
+                    return {'state': 'ready', **self.backend}
                 raise ValueError('Managed ComfyUI is still starting.')
             with socket.socket() as sock:
                 sock.settimeout(1)
                 if sock.connect_ex(('127.0.0.1', int(url.rsplit(':', 1)[1]))) == 0:
-                    raise ValueError('ComfyUI loopback port is occupied; no process was started.')
+                    raise ValueError('ComfyUI port belongs to an external instance; no process was started.')
             validate_comfy(cwd)
             self.backend = probe_python(command[0])
             command += ['--disable-all-custom-nodes', '--disable-api-nodes', '--disable-auto-launch']
@@ -223,16 +297,22 @@ class ComfyProcess:
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True, shell=False)
             deadline = time.monotonic() + timeout
             while time.monotonic() < deadline:
+                if self.stopping.is_set():
+                    self.stop()
+                    raise ValueError('ComfyUI startup was stopped.')
                 if self.process.poll() is not None:
                     self.stop()
                     raise ValueError('ComfyUI exited during startup; verify dependencies and selected directories.')
-                if healthy(url):
+                if self.verify_listener() and healthy(url):
                     return {'state': 'ready', **self.backend}
                 time.sleep(.25)
             self.stop()
             raise ValueError('ComfyUI startup timed out; managed process stopped.')
 
-    def stop(self):
+    def stop(self, final=False):
+        if final:
+            self.closed.set()
+        self.stopping.set()
         with self.lock:
             proc = self.process
             if proc and proc.poll() is None:
@@ -247,4 +327,4 @@ class ComfyProcess:
 
     def healthy_owned(self):
         from comfy_startup import healthy
-        return bool(self.process and self.process.poll() is None and healthy(self.config['comfy_url']))
+        return bool(self.verify_listener() and healthy(self.config['comfy_url']))

@@ -299,3 +299,36 @@ GPU 专项集合为 `test_macos_bridge`、`test_bridge`、`test_comfy_startup`�
 5. 审批 Orca 插件更新后验证实际面板。测试卸载预览和服务注销，核对模型、工作流与全部保留数据不变。
 
 **限制。** custom/API nodes、Intel/Rosetta、其他 GPU 应用不支持；不承诺进程组等同于 Job Objects 或出站沙箱。强制杀死 Bridge/断电可能遗留 ComfyUI，重启拒绝接管端口，需人工核对并停止原实例。未知提交不自动重投；运行中任务只能本机停止整个托管 ComfyUI。没有自动升级/覆盖/删除保留数据的功能。真实 MPS、网络、LaunchAgent 和 Windows native 均待实机验收；原有 Toolkit worker 空闲回收限制继续存在。
+
+
+## 13. PR #5 针对性安全修复（2026-11-05）
+
+本次仅修复 `feature/macos-gpu-comfyui` 的网络、鉴权和服务生命周期边界，未增加 GPU/远程功能。以下结果替代第 12 节的运行期恢复语义及测试计数。
+
+| 安全边界 | 修复和离线证据 |
+| --- | --- |
+| 本机 Tailscale 绑定 | 启动前及绑定后检查 Self/节点 ID，并核对 ifconfig 的 utun IPv4；Self 有地址但接口缺失、地址落在 en0、地址漂移全部拒绝，测试断言没有地址回退。 |
+| 运行期监测 | 每轮间隔 1 秒执行检查；Tailscale/ifconfig/lsof 各有 4 秒超时。请求同时实时检查，不仅依赖后台结果。故障检测后锁定拒绝并退出；恢复不自动解锁。 |
+| 每请求鉴权 | 对 status、任务列表/状态/提交/取消、工作流、产物、上传及未知/禁用路由逐一测试：同一个 keep-alive socket 先成功请求，再错误 Token 或切换未授权 peer，全部返回固定 403，未调用后端。忽略伪造 X-Forwarded-For。 |
+| Token 轮换 | 私有 Token 文件原子替换后，同一连接新 Token 成功、旧 Token 拒绝；本地管理 Bearer 同步失效。系统探测完成后再次读 Token；非法权限/文件内容失败关闭。 |
+| 服务停止/重启 | 实际临时回环服务器使用生产 serve/关闭逻辑；地址消失、变化、Tailscale 断线、接口消失、探测超时、ComfyUI 监听异常后，Bridge 和管理端口拒绝新连接，已接受 socket 收到 EOF。退出/SIGTERM 的共同清理路径、管理端口启动失败亦关闭资源。恢复前重启不绑定端口，恢复后新实例重新验证。 |
+| LaunchAgent | plistlib 参数数组正确保留空格、XML 特殊字符和引号；系统 plutil lint 通过。无 UserName/root LaunchDaemon；拒绝 root/euid 提权。KeepAlive=false，mock 异常退出只允许显式 kickstart，服务重新检查安全条件。 |
+| 停止/卸载 | 校验完整 plist 与 launcher 元数据及权限；截短参数、替换程序、修改 KeepAlive/UserName 均拒绝 stop/uninstall，不删除文件；正常卸载保留用户标记文件、配置/Token、ComfyUI 和工作流。 |
+| ComfyUI | 固定 127.0.0.1:8188 和既有禁用参数；lsof Mock 验证受管 PID 与实际监听地址，拒绝 wildcard/公网/Tailscale/IPv6/其他 PID/探测异常；健康/后端访问之前检查，每次后端调用重做。只终止当前持有的子进程；服务最终停止后迟到的 Start 被拒绝。 |
+
+验证命令及结果：
+
+```sh
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_macos*.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+git diff --check
+python3 scripts/check.py
+```
+
+- macOS 专项 44 项通过，其中 `test_macos_security.py` 新增 21 项。
+- 全部 Python Bridge 185 项：182 通过、0 失败、3 Windows 专属跳过。
+- 全部 Toolkit Node 78 项：77 通过、0 失败、1 Windows 原生探针跳过。
+- diff whitespace、源码/语法/私密文件扫描通过。预期 malformed workflow 夹具的日志异常不表示测试失败。
+
+**剩余风险/未验证项。** 所有 Tailscale、ifconfig、lsof、launchctl、Popen/killpg 都是 Mock；未查询真实网络状态、注册 LaunchAgent、读取真实配置/Token、访问 VPS、下载模型或执行真实 GPU。实际 macOS Tailscale utun 命名/status 格式、lsof 输出及权限、真实登录/信号和 MPS 仍需后续实机验收。探测是有超时的周期检查，不是 OS 网络沙箱，故障出现到检测存在间隔；检测后立即锁定，关闭已接受连接可能中断下载。ComfyUI 必须仍是可信本地安装，Bridge 不绕过其认证或自动接管外部实例。SIGKILL/断电可能遗留 ComfyUI；禁止自动重启和外部进程接管，需人工处理。Token 文件应以 0600 原子替换并同步客户端；其他配置修改须显式重启。原有 Windows 专属跳过仍不代表 Windows 实机验收。

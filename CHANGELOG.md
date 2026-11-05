@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-05 — PR #5 macOS Bridge 网络安全修复
+
+- 启动前和绑定后核验 Tailscale Self 与本机 utun 地址；运行期后台监测地址消失/变化、离线、配置变化和探测失败，锁定拒绝并关闭所有服务连接。无监听地址回退；网络恢复后须显式重启并重新校验。
+- 所有远程 API 每请求校验 Bearer、peer IP/节点身份/在线状态；Token 从私有文件实时读取，覆盖 keep-alive 与原子轮换，错误响应保持固定脱敏内容。
+- LaunchAgent 保持当前用户 GUI domain、参数数组及 KeepAlive=false；拒绝 root/euid 提权，start/stop/uninstall 校验完整 plist 和 launcher 元数据，保留用户文件。
+- 托管 ComfyUI 固定 127.0.0.1:8188，并在启动、后端调用前和后台用 mock 可替换的 lsof 探测实际监听/PID；异常停止受管子进程，服务退出后拒绝迟到的 Start。
+- 新增 21 项安全回归；全部 Python Bridge 185 项（182 通过、3 Windows 专属跳过），Toolkit Node 78 项（77 通过、1 Windows 原生探针跳过）。仅临时目录、Mock Tailscale/ifconfig/lsof/launchctl/Popen 和回环 Mock ComfyUI；未连接真实 VPS 或执行 GPU 工作流。
+
 ## 2026-11-05 — macOS ComfyUI Bridge 阶段 4 开发记录
 
 - 复用 Bridge HTTP、工作流、任务/产物和原 VPS MCP；新增 macOS 平台 adapter、私有配置/token、独立安装管理 CLI 与用户级 LaunchAgent。安装/卸载先预览确认，保留用户软件、模型、工作流和任务数据。

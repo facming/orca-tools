@@ -4,6 +4,7 @@ from pathlib import Path
 # LaunchAgent uses -I: add only this installed, owner-private application directory.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import argparse
+import copy
 import hmac
 import http.server
 import json
@@ -12,17 +13,16 @@ import logging.handlers
 import os
 import secrets
 import signal
+import socket
 import threading
-from bridge_platform.macos import MacOSPlatform, ComfyProcess, environment, private_path
+from bridge_platform.macos import MacOSPlatform, ComfyProcess, environment, private_path, read_token
 from bridge import Bridge, Server, make_handler, acquire_instance_lock
 
 
 def load_config(file, adapter):
     private_path(adapter.root, True)
     config = json.loads(private_path(file).read_text())
-    token = private_path(adapter.root / 'token').read_text().strip()
-    if len(token) != 64 or any(c not in '0123456789abcdef' for c in token):
-        raise ValueError('Invalid bridge token file.')
+    token = read_token(adapter.root)
     if config.get('platform') != 'darwin' or config.get('data_dir') != str(adapter.root):
         raise ValueError('Invalid macOS bridge configuration.')
     if config.get('native') or config.get('tripo'):
@@ -33,12 +33,90 @@ def load_config(file, adapter):
     return config
 
 
+class RuntimeSecurity:
+    """A network/configuration failure is latched until a fresh service start."""
+    def __init__(self, config, adapter):
+        self.config = copy.deepcopy(config)
+        self.adapter = adapter
+        self.revoked = threading.Event()
+
+    def check(self):
+        if self.revoked.is_set():
+            return None
+        try:
+            fresh = load_config(self.adapter.root / 'config.json', self.adapter)
+            # Token rotation is live; every other setting requires a restart.
+            if {k: v for k, v in fresh.items() if k != 'token'} != {k: v for k, v in self.config.items() if k != 'token'}:
+                raise ValueError()
+            status = self.adapter.validate_network(fresh)
+            if not self.revoked.is_set():
+                return fresh, status
+        except Exception:
+            self.revoked.set()
+        return None
+
+    def authorize(self, authorization, peer):
+        # Reject unknown peers/bad credentials before spawning status commands.
+        try:
+            if self.revoked.is_set() or peer not in self.config['allowed_peers']:
+                return False
+            if not hmac.compare_digest(authorization.encode(), ('Bearer ' + read_token(self.adapter.root)).encode()):
+                return False
+        except Exception:
+            self.revoked.set()
+            return False
+        checked = self.check()
+        if not checked:
+            return False
+        config, status = checked
+        try:
+            # Rotation may have happened while the system probes were running.
+            token_ok = hmac.compare_digest(authorization.encode(), ('Bearer ' + read_token(self.adapter.root)).encode())
+        except Exception:
+            self.revoked.set()
+            return False
+        peer_ok = peer in config['allowed_peers'] and any(
+            p.get('ID') == config['peer_ids'][peer] and p.get('Online') is True and peer in p.get('TailscaleIPs', [])
+            for p in status.get('Peer', {}).values())
+        return token_ok and peer_ok and not self.revoked.is_set()
+
+
+class ClosingServer(Server):
+    """Close accepted keep-alive/stream sockets as well as the listening port."""
+    def __init__(self, *args, **kwargs):
+        self.connections = set()
+        self.connections_lock = threading.Lock()
+        super().__init__(*args, **kwargs)
+
+    def get_request(self):
+        request, address = super().get_request()
+        with self.connections_lock:
+            self.connections.add(request)
+        return request, address
+
+    def shutdown_request(self, request):
+        with self.connections_lock:
+            self.connections.discard(request)
+        super().shutdown_request(request)
+
+    def server_close(self):
+        super().server_close()
+        with self.connections_lock:
+            for connection in self.connections:
+                try:
+                    connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+                connection.close()
+            self.connections.clear()
+
+
 def health(bridge, process):
     checks = {'installed': False, 'launch_agent': False, 'tailscale': False, 'token': False, 'peers': False, 'comfyui': False}
     try:
         fresh = load_config(bridge.platform.root / 'config.json', bridge.platform)
         # Runtime config changes require an explicit service restart.
-        if fresh != bridge.config:
+        if {k: v for k, v in fresh.items() if k != 'token'} != {k: v for k, v in bridge.config.items() if k != 'token'}:
             raise ValueError()
         private_path(bridge.platform.root / 'launcher.json')
         checks['installed'] = True
@@ -52,7 +130,7 @@ def health(bridge, process):
     return {'platform': 'darwin', 'capability': 'comfyui', 'ready': all(checks.values()), 'checks': checks, **process.backend}
 
 
-def start_admin(bridge, process, port=18773):
+def start_admin(bridge, process, port=18773, security=None):
     session = secrets.token_hex(32)
     class Handler(http.server.BaseHTTPRequestHandler):
         def setup(self):
@@ -71,6 +149,8 @@ def start_admin(bridge, process, port=18773):
             self.end_headers()
             self.wfile.write(data)
         def handle_request(self):
+            if security and security.revoked.is_set():
+                return self.reply(403, {'error': 'Access denied.'})
             expected = '127.0.0.1:' + str(self.server.server_port)
             if self.headers.get('Host') != expected or self.headers.get('Origin') not in (None, 'http://' + expected):
                 return self.reply(403, {'error': 'Access denied.'})
@@ -83,7 +163,10 @@ async function show(action){const r=await fetch('/api/'+action,{method:['start',
 for(const action of ['start','stop'])document.getElementById(action).onclick=()=>show(action);document.getElementById('refresh').onclick=()=>show('health');show('health');</script>'''
                 html = html.replace('const token="' + session + '"', "const token='" + session + "'")
                 return self.reply(200, html, True)
-            bearer = hmac.compare_digest(self.headers.get('Authorization', '').encode(), ('Bearer ' + bridge.config['token']).encode())
+            try:
+                bearer = hmac.compare_digest(self.headers.get('Authorization', '').encode(), ('Bearer ' + read_token(bridge.platform.root)).encode())
+            except Exception:
+                bearer = False
             local = hmac.compare_digest(self.headers.get('X-Admin-Token', '').encode(), session.encode())
             if not (bearer or local):
                 return self.reply(403, {'error': 'Access denied.'})
@@ -103,7 +186,7 @@ for(const action of ['start','stop'])document.getElementById(action).onclick=()=
                 logging.error('Managed ComfyUI operation failed; check environment, port and dependencies')
                 return self.reply(400, {'error': 'ComfyUI operation failed. Check environment, port and dependencies.'})
         do_GET = do_POST = handle_request
-    server = Server(('127.0.0.1', port), Handler)
+    server = ClosingServer(('127.0.0.1', port), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 
@@ -128,6 +211,51 @@ class FixedDiagnostics(logging.Filter):
         return True
 
 
+def serve(config, adapter, interval=1):
+    security = RuntimeSecurity(config, adapter)
+    if not security.check():
+        raise ValueError('Bridge startup security checks failed.')
+    process = ComfyProcess(config, adapter)
+    from bridge import ComfyAdapter
+    bridge = Bridge(config, ManagedAdapter(process, ComfyAdapter(config['comfy_url'])), adapter)
+    server = admin = monitor = None
+    done = threading.Event()
+    try:
+        server = ClosingServer((config['listen'], config['port']), make_handler(bridge, security))
+        # Recheck after bind, before accepting anything. Never retry another IP.
+        if not security.check():
+            raise ValueError('Bridge startup security checks failed.')
+        admin = start_admin(bridge, process, security=security)
+        def watch():
+            while not done.wait(interval):
+                try:
+                    valid = security.check() is not None
+                    if process.process and process.process.poll() is None:
+                        valid = process.verify_listener(required=False) and valid
+                except Exception:
+                    valid = False
+                if not valid:
+                    security.revoked.set()
+                    logging.warning('Bridge stopped after a runtime security check failed')
+                    server.shutdown()
+                    return
+        monitor = threading.Thread(target=watch, daemon=True, name='bridge-security')
+        monitor.start()
+        # ComfyUI still requires an explicit local Start action.
+        server.serve_forever(poll_interval=.1)
+    finally:
+        security.revoked.set()
+        done.set()
+        if server:
+            server.server_close()
+        if admin:
+            admin.shutdown()
+            admin.server_close()
+        if monitor:
+            monitor.join(timeout=10)
+        process.stop(final=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', required=True)
@@ -138,26 +266,17 @@ def main():
         adapter = MacOSPlatform()
         config = load_config(args.config, adapter)
         adapter.validate_network(config)
-        acquire_instance_lock(adapter.root)
+        instance = acquire_instance_lock(adapter.root)
         private_path(adapter.logs, True)
         handler = logging.handlers.RotatingFileHandler(adapter.logs / 'bridge.log', maxBytes=1024*1024, backupCount=2)
         # Never persist exception details, user inputs or third-party output on Mac.
         handler.addFilter(FixedDiagnostics())
         logging.basicConfig(level=logging.INFO, handlers=[handler])
-        process = ComfyProcess(config, adapter)
-        from bridge import ComfyAdapter
-        bridge = Bridge(config, ManagedAdapter(process, ComfyAdapter(config['comfy_url'])), adapter)
-        server = Server((config['listen'], config['port']), make_handler(bridge))
-        admin = start_admin(bridge, process)
         signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
         try:
-            # Startup never starts ComfyUI without a local explicit Start action.
-            server.serve_forever()
+            serve(config, adapter)
         finally:
-            server.server_close()
-            admin.shutdown()
-            admin.server_close()
-            process.stop()
+            instance.close()
     except KeyboardInterrupt:
         pass
     except Exception:

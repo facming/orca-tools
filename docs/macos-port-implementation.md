@@ -164,15 +164,17 @@ python3 scripts/install-local-gpu-macos.py uninstall --confirm
 - `~/Library/Caches/LocalGpuBridge/`：预留私有缓存目录。
 - `~/Library/LaunchAgents/org.orca.local-gpu-bridge.plist`：当前用户服务。
 
-Bridge 自有目录 0700，token/config/launcher/client export 和 app 文件 0600；umask 077。检查属主、类型和权限，拒绝符号链接。已有安装不覆盖；失败后保留已创建内容供人工检查，不自动清理。已有 LaunchAgents 父目录可以是安全的 0755，不擅自 chmod 共享目录。plist 使用参数数组、`-I`、当前用户 GUI domain，无 shell、无 token 参数、无 root LaunchDaemon。`start` 对已加载但退出的 agent 使用 kickstart，对未注册的使用 bootstrap；`stop` 使用 bootout。卸载先预览，仅停止服务并删除自己的 plist/launcher；保留全部应用、配置、token、任务、缓存和日志，更不会删除 ComfyUI、模型或工作流。重装与升级保留人工审查边界，不自动覆盖残留安装。
+Bridge 自有目录 0700，token/config/launcher/client export 和 app 文件 0600；umask 077。检查属主、类型和权限，拒绝符号链接。已有安装不覆盖；失败后保留已创建内容供人工检查，不自动清理。已有 LaunchAgents 父目录可以是安全的 0755，不擅自 chmod 共享目录。plist 使用参数数组、`-I`、当前用户 GUI domain，无 shell、无 token 参数、无 root LaunchDaemon。显式拒绝 root/euid 提权用户；start/stop/uninstall 先校验私有 launcher 元数据及完整 plist 与受管模板一致。`KeepAlive=false`，异常退出不自动重启；用户显式 `start` 对已加载但退出的 agent 使用 kickstart，对未注册的使用 bootstrap；`stop` 使用 bootout。每次启动重新完成配置、Token、本机接口和 Tailscale 身份校验。卸载先预览，仅停止服务并删除自己的 plist/launcher；保留全部应用、配置、token、任务、缓存和日志，更不会删除 ComfyUI、模型或工作流。重装与升级保留人工审查边界，不自动覆盖残留安装。
 
 安装会注册并启动 Bridge，但不会自动启动 ComfyUI。用户在 `http://127.0.0.1:18773/` 点击 Start，选择的可信 ComfyUI 才会执行。专用进程组支持正常停止、超时终止和必要的 SIGKILL；不从持久化 PID 杀进程，不接管外部 ComfyUI。如果端口已被手动启动的实例占用，拒绝托管启动并提示人工处理。
 
-启动固定 `--listen 127.0.0.1`，禁用 custom nodes、API nodes 和浏览器自动打开；旧版本缺少禁用参数时拒绝安装。MPS 可用时使用 ComfyUI 的原生 MPS 选择，不添加 CUDA/OptiX 参数；不可用则明确报告 `backend=cpu, cpu_fallback=true` 并加入 `--cpu`。自定义节点工作流不在本阶段支持范围。ComfyUI 本身必须是用户审核过的可信安装，禁用节点不是操作系统沙箱。第三方 stdout/stderr 不转存，避免敏感内容进入 Bridge 日志；日志只记录固定诊断，调试输出需用户另外在可信本地环境检查。
+启动固定 `--listen 127.0.0.1`，禁用 custom nodes、API nodes 和浏览器自动打开；启动探测、每次 Bridge 后端调用前及后台监测均用系统 lsof 核验 8188 端口的实际监听地址为 127.0.0.1、PID 属于当前持有的子进程，发现 wildcard、IPv6、Tailscale 地址、其他 PID 或探测异常时拒绝访问并停止自己的子进程；旧版本缺少禁用参数时拒绝安装。MPS 可用时使用 ComfyUI 的原生 MPS 选择，不添加 CUDA/OptiX 参数；不可用则明确报告 `backend=cpu, cpu_fallback=true` 并加入 `--cpu`。自定义节点工作流不在本阶段支持范围。ComfyUI 本身必须是用户审核过的可信安装，禁用节点不是操作系统沙箱。第三方 stdout/stderr 不转存，避免敏感内容进入 Bridge 日志；日志只记录固定诊断，调试输出需用户另外在可信本地环境检查。
 
 ### 网络与 ready
 
-Bridge 启动前要求 Tailscale `BackendState=Running`、Self 在线、指定地址位于 `100.64.0.0/10` 且属于 Self。安装时记录 Self 与批准 peer 的稳定节点 ID。每个请求先验证 Bearer 和非浏览器 Origin，再实时读取 Tailscale status，核对本机地址/身份、peer IP/节点 ID/在线状态。不接受 X-Forwarded-For 身份。未授权、Tailscale 离线、身份/IP 变化、CLI 超时均拒绝；启动失败不换地址，禁止公网、IPv6、LAN 和 wildcard。运行期间 Tailscale 故障时拒绝请求；恢复同一身份/地址后可继续。登录时网络尚未就绪而退出的服务需用户显式 start。
+Bridge 启动前要求 Tailscale `BackendState=Running`、Self 在线、指定地址位于 `100.64.0.0/10` 且属于 Self，并用系统 ifconfig 确认该地址实际存在于本机 utun 接口。绑定后、开始接收请求前再次验证。安装时记录 Self 与批准 peer 的稳定节点 ID。每个请求先验证 Bearer 和非浏览器 Origin，再实时读取 Tailscale status，核对本机地址/身份、peer IP/节点 ID/在线状态。不接受 X-Forwarded-For 身份。未授权、Tailscale 离线、身份/IP 变化、CLI 超时均拒绝；启动失败不换地址，禁止公网、IPv6、LAN 和 wildcard。后台每轮间隔 1 秒重新检查配置、Tailscale 和本机接口；探测命令分别有 4 秒超时。发现故障立即锁定拒绝远程请求，并关闭监听及已接受的 keep-alive/下载连接、管理端口和受管 ComfyUI。恢复网络不会清除锁定，必须显式 start 并通过全部检查。登录时网络尚未就绪而退出的服务也需用户显式 start。
+
+远程 API 和本地管理 Bearer 逐请求读取 0600 Token 文件，原子替换为有效 Token 后旧值立即失效；远程鉴权还在系统探测后重读 Token，避免探测期间轮换仍放行旧值。其他配置变化须重启；无效 Token/权限异常失败关闭。Token 轮换不自动改写已有 client export，客户端需经私密渠道同步。
 
 管理服务只监听 127.0.0.1，检查 Host、会话 token、Origin 和固定路由；远程 Bearer 不写入 HTML。Toolkit 读私有 token 后调用 `/api/health`。只有 installed、launch_agent、tailscale、token、peers、comfyui 六项均真且受管进程及 `/queue` 实际通过时显示 ready。launcher 存在不能判定 ready，token 权限异常、服务/ComfyUI 离线时为 offline。Mac 不自动运行 Windows launcher/native；Toolkit activation 不自动启动 GPU。
 

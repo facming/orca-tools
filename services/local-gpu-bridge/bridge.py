@@ -270,7 +270,7 @@ class Bridge:
             elif job['status'] == 'running': raise ValueError('Running jobs cannot be interrupted through this bridge.')
             return self.inspect(ident)
 
-def make_handler(bridge):
+def make_handler(bridge, security=None):
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
         server_version = 'LocalBridge'
@@ -279,6 +279,9 @@ def make_handler(bridge):
             super().setup(); self.connection.settimeout(90)
         def log_message(self, fmt, *args): pass  # No tokens, prompts or filenames in request logs.
         def send_json(self, status, value):
+            if security and security.revoked.is_set() and status != 403:
+                self.close_connection = True
+                return
             if getattr(self, 'reply_started', False): self.close_connection = True; return
             self.reply_started = True
             value = remote_json(value, resources=urllib.parse.urlsplit(self.path).path.startswith('/v1/tripo/'))
@@ -287,6 +290,9 @@ def make_handler(bridge):
             self.send_header('Content-Length', str(len(data))); self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff'); self.end_headers(); self.wfile.write(data)
         def authorized(self):
+            if security:
+                return (not self.headers.get('Origin') and
+                        security.authorize(self.headers.get('Authorization', ''), self.client_address[0]))
             expected = 'Bearer ' + bridge.config['token']
             return (not self.headers.get('Origin') and
                     hmac.compare_digest(self.headers.get('Authorization', '').encode(), expected.encode()) and
@@ -297,6 +303,8 @@ def make_handler(bridge):
             if size < 0 or size > MAX_BODY: raise ValueError('Request is too large.')
             if self.headers.get('Content-Type', '').split(';')[0] != 'application/json': raise ValueError('Expected JSON.')
             value = json.loads(self.rfile.read(size))
+            if security and not self.authorized():
+                raise ValueError('Access denied.')
             if not isinstance(value, dict): raise ValueError('Expected a JSON object.')
             return value
         def handle_request(self):
@@ -378,6 +386,9 @@ def make_handler(bridge):
                         self.send_header('Cache-Control', 'no-store'); self.send_header('X-Content-Type-Options', 'nosniff'); self.end_headers()
                         left = size
                         while left:
+                            if security and security.revoked.is_set():
+                                self.close_connection = True
+                                return
                             chunk = source.read(min(left, 1024*1024))
                             if not chunk: raise ValueError('Artifact download was interrupted.')
                             self.wfile.write(chunk); left -= len(chunk)

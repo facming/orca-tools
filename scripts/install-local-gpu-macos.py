@@ -10,7 +10,7 @@ import sys
 SOURCE = Path(__file__).resolve().parents[1] / 'services/local-gpu-bridge'
 sys.path.insert(0, str(SOURCE))
 from bridge_platform.macos import (MacOSPlatform, LABEL, environment, discover_python,
-    validate_comfy, probe_python, private_dir, private_path, write_private, tail_ip)
+    validate_comfy, probe_python, private_dir, private_path, write_private, tail_ip, require_user)
 
 FILES = ['bridge.py', 'comfy_startup.py', 'workflow_library.py', 'job_reuse.py', 'remote_privacy.py', 'macos_service.py']
 
@@ -43,6 +43,7 @@ def plan(settings, adapter):
 
 
 def install(config, adapter, bridge_python=None):
+    require_user()
     # This function is called only after the preview and explicit confirmation.
     if adapter.root.exists() or adapter.root.is_symlink() or adapter.plist.exists() or adapter.plist.is_symlink():
         raise ValueError('An installation or retained data already exists. Review it manually; it will not be overwritten.')
@@ -88,11 +89,8 @@ def install(config, adapter, bridge_python=None):
 
 def uninstall(adapter):
     # Remove service registration only; keep all models, workflows, tokens, jobs and logs.
-    import plistlib
-    private_path(adapter.plist)
-    value = plistlib.loads(adapter.plist.read_bytes())
-    if value.get('Label') != LABEL or value.get('ProgramArguments', [None]*3)[2] != str(adapter.root / 'app/macos_service.py'):
-        raise ValueError('LaunchAgent is not the managed bridge; refusing removal.')
+    require_user()
+    adapter.validate_launch_agent()
     if adapter.launchctl('status'):
         adapter.launchctl('stop')
     else:
