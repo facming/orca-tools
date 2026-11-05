@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-05 — macOS Unity 阶段 5C
+
+- 新增独立 Unity adapter、固定白名单 Editor API 扩展、四引擎 Toolkit 状态与安装打包；保留 Unity MCP 名称及 native 任务/下载协议。
+- Hub/Editor 元数据发现、arm64/权限/系统与完整项目版本检查；当前限定 Unity 6000.0 正式版及 URP/HDRP 17.0.x，不自动安装、下载模块或升级项目。
+- 本地 allow_scripts + 每请求 authorized=true；C# 明确非沙箱。固定对象/组件/场景/Play/Game View/Console/受限资产操作，无 eval/shell/任意文件接口。
+- Metal 和 Editor API 心跳通过才显示 running；独立 Popen/任务、取消/超时/重启未知结果、不接管外部 PID；Scene 排他发布、PNG 校验、产物 SHA-256 和下载复验。
+- Windows native Unity/Job Objects 实现保留；共享 HTTP 仅兼容新增授权信封。全部验证使用 Mock/临时数据，真实 C# 编译、Editor API 和 Metal 仍待人工验收。
+
 ## 2026-11-05 — macOS Blender 阶段 5B
 
 - 新增独立 Blender adapter 与多引擎 native 分发，发现/选择已有 Blender.app 或 arm64 可执行文件；检查稳定版本与执行权限，不自动安装或接管现有进程。

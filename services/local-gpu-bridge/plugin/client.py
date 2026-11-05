@@ -88,10 +88,10 @@ TRIPO_FILE_TOOLS = [
 TRIPO_FILE_NAMES = {t['name'] for t in TRIPO_FILE_TOOLS}
 
 UNITY_TOOLS = NATIVE_COMMON + [
-    tool('unity_start','Start the managed Unity Editor for an approved local project. Pulls Git first if configured. Import may take time; use unity_tools afterwards. No desktop screenshot fallback.',{'project_id':STR},['project_id'],False),
-    tool('unity_stop','Stop only the managed Unity Editor for this project. Save scene changes through an exposed Editor tool first.',{'project_id':STR},['project_id'],False),
-    tool('unity_tools','List the official Unity Pipeline tools exposed by this managed project. Shell, arbitrary C# eval, account and system tools are excluded.',{'project_id':STR},['project_id']),
-    tool('unity_call','Invoke a tool name and arguments obtained from unity_tools. Scenes, objects, assets, Play mode and viewport capture depend on the installed Pipeline catalog. No generic shell; no automatic retry of edits.',{'project_id':STR,'name':STR,'arguments':{'type':'object'}},['project_id','name'],False),
+    tool('unity_start','Start the managed Unity Editor for an approved local project. Pulls Git first if configured. Import may take time; use unity_tools afterwards. No desktop screenshot fallback.',{'project_id':STR,'authorized':{'type':'boolean','description':'Explicit approval to run trusted project C# with user permissions; not sandboxed.'}},['project_id','authorized'],False),
+    tool('unity_stop','Stop only the managed Unity Editor for this project. Save scene changes through an exposed Editor tool first.',{'project_id':STR,'authorized':{'type':'boolean','description':'Explicit approval to run trusted project C# with user permissions; not sandboxed.'}},['project_id','authorized'],False),
+    tool('unity_tools','List the Unity Editor tools exposed by this managed project. Shell, arbitrary C# eval, account and system tools are excluded.',{'project_id':STR,'authorized':{'type':'boolean','description':'Explicit approval to run trusted project C# with user permissions; not sandboxed.'}},['project_id','authorized']),
+    tool('unity_call','Invoke a tool name and arguments obtained from unity_tools. Scenes, objects, assets, Play mode and viewport capture depend on the installed Editor catalog. macOS returns a native task; poll native_job_status. No generic shell or automatic retry.',{'project_id':STR,'name':STR,'arguments':{'type':'object'},'authorized':{'type':'boolean'}},['project_id','name','authorized'],False),
 ]
 
 def vroid_state_result(result, operation):

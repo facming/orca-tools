@@ -98,3 +98,17 @@ test('Blender status is independent and every availability check must pass',asyn
  state.value.blender.state='available';state.value.platform='win32';assert.equal((await gpu.status()).blender.state,'error');
  assert.match(compose('overview','darwin'),/blender-state/);
 });
+test('Unity running requires owned Editor API and Metal; all four engines stay independent',async t=>{
+ const f=fixture(t),state=await manager(t,f),gpu=new Gpu(f.runtime);
+ const base=['installed','path','permissions','version','architecture','bridge_api'];
+ const all=[...base,'editor_api','metal','graphics'];
+ state.value.unity={state:'running',checks:Object.fromEntries(all.map(k=>[k,true]))};
+ state.value.blender={state:'available',checks:Object.fromEntries(base.map(k=>[k,true]))};
+ state.value.godot={state:'available',checks:Object.fromEntries(base.map(k=>[k,true]))};
+ assert.equal((await gpu.status()).unity.state,'running');
+ for(const key of all){state.value.unity.checks[key]=false;const value=await gpu.status();assert.equal(value.unity.state,'error',key);assert.equal(value.blender.state,'available');assert.equal(value.godot.state,'available');assert.equal(value.comfyui.state,'running');state.value.unity.checks[key]=true;}
+ state.value.unity.state='available';state.value.unity.checks.editor_api=false;assert.equal((await gpu.status()).unity.state,'available');
+ state.value.checks.comfyui=false;state.value.ready=false;assert.equal((await gpu.status()).unity.state,'available');
+ for(const value of ['installed','unsupported','error']){state.value.unity.state=value;assert.equal((await gpu.status()).unity.state,value);}
+ assert.match(compose('overview','darwin'),/unity-state/);
+});

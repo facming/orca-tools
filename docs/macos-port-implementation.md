@@ -288,3 +288,49 @@ Toolkit 分别显示 ComfyUI/Godot/Blender 状态。Blender available/running �
 **没有安全沙箱，也没有 macOS 出站网络隔离。** 授权 Python 仍以登录用户权限运行，可自行访问文件/网络、改变项目或派生进程；路径防护与新文件发布约束 Bridge 自身，无法阻止受信任脚本主动覆盖文件。进程组不等价 Windows Job Objects，脱离 session 的后代或断电/SIGKILL 遗留进程需人工检查。媒体内容不由日志脱敏处理。
 
 实现参考 [Blender 官方命令行文档](https://docs.blender.org/manual/en/4.2/advanced/command_line/arguments.html) 和 [Cycles 官方设备实现](https://github.com/blender/blender/blob/main/intern/cycles/blender/addon/properties.py)。本轮仅 Mock Blender、Mock Metal、临时项目、合成文件和回环 HTTP；真实版本/Metal/GUI、扩展、TCC/Gatekeeper、信号及 VPS 链路均待 ChatGPT 审查后人工授权验收。
+
+## 11. 阶段 5C：macOS Unity（2026-11-05）
+
+### 架构和本地启用
+
+`bridge_platform/macos_unity.py` 是独立 adapter；Windows `native_unity.py`、`native_unity_commands.py`、`native_control.py`、`native_process.py` 不修改。复用现有 `/v1/unity/start|stop|tools|call`、`unity_start/stop/tools/call` 和 native task/status/cancel/artifact 协议。Mac `unity_start` 返回 Editor 会话任务，`unity_call` 返回编辑任务；通过 `native_job_status` / `wait_native_job` 查询，产物用 `fetch_native_artifact`。不要自动重试编辑。
+
+仓库现有 Pipeline 通过外部 official CLI 动态发现工具，未 vendoring Editor 源码；无法仅凭动态名称确认其文件/组件操作边界。本阶段保留外层 MCP 架构，新增固定白名单 `OrcaUnityBridge.cs`，**不声称兼容任意官方 Pipeline 版本/工具名**。不启动 CLI、不安装 Pipeline、不调用其 eval/menu/batch/安装/build 功能。用户应先读取本会话的 `unity_tools`，使用返回的固定工具名。Windows 继续原 Pipeline。共享 MCP 四个 Unity 工具均要求 boolean `authorized`；Windows HTTP 仅消费新增信封字段，显式 false/非 true 拒绝，旧无字段 HTTP 兼容和原 Windows guard 保留。
+
+审查和人工批准后，用户在专用可信项目副本中手动放置本仓库扩展为 `Assets/Editor/OrcaUnityBridge.cs`。Bridge 比较文件完整内容，不自动复制或更新项目脚本。本地 `native.unity_executable` 指向已有 Unity.app 或其 `Contents/MacOS/Unity`；`native.projects` 中配置 `id/root/enabled=true/allow_scripts=true`，可选相对 `unity_subdir`。未设置 allow_scripts 或请求缺少 `authorized=true` 均拒绝启动及 Editor 操作。启用脚本意味着信任整个项目和已有插件，**不可信项目禁止启用**。
+
+发现 API `discover()` 只读 `/Applications`、用户 Applications 中的 Hub/Editor 元数据及用户指定路径，不运行 Hub、不自动选版本。没有 Unity/模块安装下载、账号/授权激活、项目升级、Git 自动同步、Preferences/Player Settings/Graphics API 修改接口。Editor 自身正常导入会写入已批准项目的 Library/Temp/元数据；已安装依赖和本地许可须先准备好，Bridge 不承诺阻止 Unity/项目代码的网络行为。
+
+### 版本和图形边界
+
+- 仅 native macOS arm64 Mach-O（包含 arm64 slice 的 universal 可候选）；拒绝 Intel/Rosetta、无执行权限、可被 group/other 写入的 executable 和符号链接路径。
+- 当前实现白名单为稳定 `6000.0.<patch>f<revision>`，不是“所有 Unity 6 已验证”。完整版本从 bundle metadata 读取，必须唯一、且与 `ProjectVersion.txt` 完全一致；API 心跳再次核对 `Application.unityVersion`。缺失/不明确版本直接 unsupported，不执行版本探针，不猜版本，不升级项目。
+- 最低系统要求采用 `max(macOS 11, LSMinimumSystemVersion)`。这是预检下限，不代表对每个新 macOS 版本都完成验收。[Unity 6.0 系统要求](https://docs.unity.com/en-us/engine/6000.0/manual/get-started/install-and-upgrade/getting-started-installing-unity/system-requirements)和 [Metal 兼容性](https://docs.unity.com/en-us/engine/6000.0/manual/platform-specific/cross-platform-features/graphics-apis/metal/requirements-and-compatibility)用于确定这一保守范围。
+- 固定启动 `-force-metal`，不接受额外 CLI 参数，不包含 D3D11/D3D12。API 实测 `SystemInfo.graphicsDeviceType == Metal`，读取 macOS Graphics API 是否自动或包含 Metal。只接受 Built-in/标准 URP/HDRP 类型；manifest 中 URP/HDRP 必须为 `17.0.x`，其他版本/自定义来源拒绝且不改文件。[Unity 6.0 URP 兼容性](https://docs.unity.com/en-us/engine/6000.0/manual/render-pipelines/universal-render-pipeline/requirements)说明图形包与 Editor 发布关联；实际 shader、HDRP feature、质量档位和 GPU 性能仍须实机验证。
+- `available` 仅表示安装/路径/版本/系统/Bridge 预检通过；启动未连接时是 `installed`。只有当前 Popen 仍存活、心跳 session/PID/project/version 对应、五秒内有效、Metal 与图形检查通过才是 `running`。健康状态不代表项目内容经过安全审计。
+
+### 固定 Editor 操作
+
+| 工具 | 边界 |
+| --- | --- |
+| editor.status / scene.get / hierarchy.get / gameobject.get | Editor 状态、加载场景、最多 1000 个场景对象；输出再次限制大小和脱敏 |
+| gameobject.create / delete / transform.set | 场景对象及局部变换；不能把任意资产/隐藏内部对象当 GameObject 修改 |
+| component.add / set | 只允许 Camera（field of view、orthographic size）、Light（intensity、range）、BoxCollider（is trigger）及值域检查 |
+| inspector.get | Transform 和上述组件的有限属性；其他组件只报告类型和 properties unsupported，不反射读取任意序列化内容 |
+| scene.save | `path` 必须是尚不存在的 `Assets/*.unity`；不覆盖 `.meta` 或场景，不改变当前 Scene 路径/dirty 标记 |
+| play.start / stop | 请求 Editor Play Mode 转换；通过 editor.status 确认实际状态 |
+| gameview.capture | 使用 Unity ScreenCapture Game View，须 Play Mode/可渲染图形会话；非桌面截图；PNG 最多 4096×4096、32 MiB |
+| console.get | 读取扩展加载后最多 100 条日志，省略 stack；后端过滤 secret、绝对路径、IP；不声称包括扩展加载前的全部 Console |
+| assets.list / asset.import | 列表仅安全的 PNG/JPEG/OBJ/Scene；import 只对已有 PNG/JPEG/OBJ 调用 AssetDatabase.ImportAsset；不上传任意脚本、不开放 delete/move/package 操作 |
+
+场景保存遵循 [SaveScene 的相对路径要求](https://docs.unity.com/en-us/engine/6000.3/script-reference/unityeditor/scenemanagement/editorscenemanager/savescene)：后端通过目录描述符排他创建 `Assets/OrcaBridge-<task-id>/`，Editor 将场景副本写为该目录的 `scene.unity`，后端校验后以 O_EXCL 发布到请求的新目标。暂存目录和 Unity 创建的 `.meta` 保留，供人工恢复/清理，不自动删除；资产列表不暴露暂存目录。Scene/PNG 均复制到私有任务目录、记录长度和 SHA-256，下载再次校验并发送已验证字节。源场景含有的游戏数据和截图内容不做隐私净化。
+
+### 任务、安全与待验收
+
+私有文件队列连接扩展和 Bridge，不新增 HTTP 监听端口。每会话随机 secret 只经最小环境传入；请求再次校验 authorized/session/task ID，响应有同一身份。原 Tailscale/token/peer/RuntimeSecurity 保护外层接口。项目路径 canonical + inode 固定，禁止系统/隐藏目录、路径穿越和符号链接，文件读取使用 O_NOFOLLOW、单硬链接、32 MiB 限额。整个项目最多扫描 100000 项，过大或有链接时失败关闭。
+
+独立 Unity store 和 Popen session；一个 Editor 会话、一次一个编辑任务。Popen 使用参数数组、shell=False、start_new_session=True、私有 HOME/TMPDIR；原始应用 stdout/stderr 丢弃，日志返回固定诊断或脱敏 Console。只终止当前持有的 Popen 进程组，不寻找/接管外部进程；已有 UnityLockfile 拒绝且不删除。停止、取消、异常和超时结束受管会话；记录退出码、timed_out/outcome_unknown。start 默认总会话上限 300 秒（包括导入），HTTP/native task 可设 1–3600 秒；编辑默认 60 秒。应在截止前完成保存。重启时活动任务 failed + outcome_unknown，不向存盘 PID 发信号，不重投。
+
+**非沙箱边界不变：** C#、Editor 插件、import callbacks、Play Mode 拥有登录用户的文件与网络权限；白名单扩展不能约束可信代码主动访问系统。进程组不等价 Windows Job Objects，脱离 session 的后代以及 Bridge 被 SIGKILL 后的遗留需人工处理。未知任务不承诺可安全重试。私有 HOME 不等价操作系统 Preferences 隔离，实际 Unity/许可行为必须在专用账户或副本验证。
+
+本轮只有 Mock Editor/Pipeline、合成 Mach-O/PNG/场景、临时项目、真实回环 HTTP 和 Python/Node 校验。**未编译或运行真实 Unity C# 扩展，未验证真实 Editor/Metal。** 人工批准后须验证：准确 bundle metadata/版本及本地许可、扩展编译/domain reload、全部 Editor API、相对路径 SaveScene 和恢复暂存、Game View 的异步 PNG、URP/HDRP 和 Metal、超时/取消/退出码、TCC/Gatekeeper/Preferences、外部进程不受影响，以及 VPS MCP 链路。失败时停止，不降级到鼠标键盘、shell 或 C# eval。
