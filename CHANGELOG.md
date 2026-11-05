@@ -1,5 +1,12 @@
 # Changelog
 
+## 2026-11-05 — macOS VRoid / Tripo 阶段 6A 技术审计
+
+- 新增 `docs/macos-vroid-tripo-audit.md`，核对 PR #8 指定 HEAD，记录官方资料、固定上游源码与本仓库证据；区分官方支持、社区声明、理论方案和未验证能力。
+- VRoid：确认 macOS 产品/M1 支持，识别定制 arm64 BepInEx/IL2CPP 依赖、内部 API 与独立 VRM 导出验证缺口；保留未达安全条件时 unsupported。
+- Tripo：比较正式 OpenAPI、官方 Blender MCP 与现有社区 Studio 会员接入；给出 VPS MCP 兼容边界、Keychain/独立 profile/文件/日志/进程方案和分阶段人工验收条件。
+- 更新实施文档阶段 6A；仅文档变更，未启动应用或浏览器、读取账号登录态、安装插件、修改用户模型项目或实施新功能。
+
 ## 2026-11-05 — macOS Unity 阶段 5C
 
 - 新增独立 Unity adapter、固定白名单 Editor API 扩展、四引擎 Toolkit 状态与安装打包；保留 Unity MCP 名称及 native 任务/下载协议。

@@ -334,3 +334,14 @@ Toolkit 分别显示 ComfyUI/Godot/Blender 状态。Blender available/running �
 **非沙箱边界不变：** C#、Editor 插件、import callbacks、Play Mode 拥有登录用户的文件与网络权限；白名单扩展不能约束可信代码主动访问系统。进程组不等价 Windows Job Objects，脱离 session 的后代以及 Bridge 被 SIGKILL 后的遗留需人工处理。未知任务不承诺可安全重试。私有 HOME 不等价操作系统 Preferences 隔离，实际 Unity/许可行为必须在专用账户或副本验证。
 
 本轮只有 Mock Editor/Pipeline、合成 Mach-O/PNG/场景、临时项目、真实回环 HTTP 和 Python/Node 校验。**未编译或运行真实 Unity C# 扩展，未验证真实 Editor/Metal。** 人工批准后须验证：准确 bundle metadata/版本及本地许可、扩展编译/domain reload、全部 Editor API、相对路径 SaveScene 和恢复暂存、Game View 的异步 PNG、URP/HDRP 和 Metal、超时/取消/退出码、TCC/Gatekeeper/Preferences、外部进程不受影响，以及 VPS MCP 链路。失败时停止，不降级到鼠标键盘、shell 或 C# eval。
+
+## 12. 阶段 6A：VRoid / Tripo macOS 技术侦察（2026-11-05）
+
+完整证据、验证程度和人工条件见 [VRoid / Tripo macOS 技术审计](macos-vroid-tripo-audit.md)。本阶段基于 PR #8 HEAD `fe0a0157c1e0d686fe06fe9eed6846abc715cd06`，从 `feature/macos-unity` 创建 `research/macos-vroid-tripo-audit`，以该功能分支为 Draft PR base。只改文档，不实现或启用 VRoid/Tripo，不修改 main、不合并。
+
+- VRoid 官方有 macOS 产品并列出 M1 支持；社区插件在固定 revision 声称定制 arm64 BepInEx/IL2CPP 栈已跑通，但 README 仍标记未随发布包支持 Mac。所依赖的外部构建栈未取得，本仓库额外 VRM 导出扩展也没有 Mac 验证。不能从 Windows、通用 Unity 或 x64 BepInEx 支持推导兼容；未达依赖、实例身份、文件安全及出站隔离要求时保持 unsupported。
+- Tripo 官方 OpenAPI 有上传、生成、任务查询和结果下载链路；官方 MCP 当前说明为 Blender Addon alpha。现有桥使用另一个社区 Studio 插件及会员接口，账户/计费/对象语义不可静默切换。优先建议官方 API 独立 backend；保留 VPS 名称、参数和 workflow 信封，未证明可映射的操作明确 unsupported。
+- 下一阶段候选模块为 Mac VRoid adapter/插件构建验收、安全会话/产物、Tripo OpenAPI/workflow adapter、专用 Keychain 凭据存储及可选新建 browser profile 管理。估算复用范围与平台专属部分见审计第 4–6 节，均不代表已经实现。
+- 安全门槛包括：不读取现有浏览器/账号数据；不自动登录；新 profile 也不等于 OS 沙箱；CDP 归属、TCC、最小子进程环境、符号/硬链接与竞态防护、下载目标限制、POSIX 路径/日志脱敏、结果未知不重投。不能通过删 guard、开放高权限 UI 自动化或改系统保护获得兼容。
+
+本阶段仅公开资料和源码静态审查，未启动真实应用/浏览器、安装插件、访问 Keychain/Cookie/密码/Token/OAuth、修改用户模型项目、上传素材或消耗积分。Mac 软件运行、登录与权限、插件编译/注入、生成与导出、VPS 全链路均未实测。后续须经 ChatGPT 审查和人工批准，按报告的离线验证、专用授权与最小真实链路分阶段推进。
