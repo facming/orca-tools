@@ -2,10 +2,12 @@
 'use strict';
 const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),crypto=require('node:crypto');
 const {DownloadManager}=require('./engine.cjs');
-const {windowsRuntime,launch}=require('./runtime.cjs');
+const {ToolkitError,publicMessage}=require('../../platform/errors.cjs');
+const {createRuntime}=require('./runtime.cjs');
 
 async function startServer(options) {
-  const manager=new DownloadManager(options),token=crypto.randomBytes(32).toString('hex');
+  const runtime=options.runtime ?? (options.transport ? null : createRuntime());
+  const manager=new DownloadManager({...options,runtime}),token=crypto.randomBytes(32).toString('hex');
   let port;
   const server=http.createServer(async(req,res)=>{
     function send(code,body,type='application/json; charset=utf-8'){
@@ -23,20 +25,20 @@ async function startServer(options) {
       if(req.method!=='POST')return send(404,{error:'Not found'});
       if(req.headers.origin!==`http://127.0.0.1:${port}`)return send(403,{error:'Invalid origin'});
       if(req.headers['content-type']?.split(';')[0]!=='application/json')return send(415,{error:'Expected JSON'});
-      let data='';for await(const part of req){data+=part.toString('utf8');if(Buffer.byteLength(data)>16384)throw Error('Request too large');}
+      let data='';for await(const part of req){data+=part.toString('utf8');if(Buffer.byteLength(data)>16384)throw new ToolkitError('Request too large');}
       const body=JSON.parse(data);
-      if(!body||typeof body!=='object'||Array.isArray(body))throw Error('Invalid request');
+      if(!body||typeof body!=='object'||Array.isArray(body))throw new ToolkitError('Invalid request');
       if(req.url==='/api/jobs')return send(201,{job:await manager.create(body)});
       if(req.url==='/api/action')return send(200,{job:await manager.action(body.id,body.action)});
       if(req.url==='/api/pause-all'){await manager.pauseAll();return send(200,{ok:true});}
       if(req.url==='/api/open-folder'){
-        const job=manager.jobs.get(body.id);if(!job)throw Error('Download not found');
-        const runtime=options.runtime||windowsRuntime();
-        await launch(runtime.explorer,[path.dirname(job.destination)],runtime.childEnv);
+        const job=manager.jobs.get(body.id);if(!job)throw new ToolkitError('Download not found');
+        if(!runtime)throw new ToolkitError('Opening folders requires the Toolkit runtime.');
+        await runtime.openPath(path.dirname(job.destination));
         return send(200,{ok:true});
       }
       return send(404,{error:'Not found'});
-    }catch(error){if(!res.headersSent)send(400,{error:String(error.message).slice(0,500)});else res.destroy();}
+    }catch(error){if(!res.headersSent)send(400,{error:publicMessage(error)});else res.destroy();}
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(options.port??18770,'127.0.0.1',resolve);});
   port=server.address().port;

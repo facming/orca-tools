@@ -1,4 +1,5 @@
 'use strict';
+const {ToolkitError, publicMessage} = require('../../platform/errors.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -9,12 +10,12 @@ class Semaphore {
   async run(signal, operation) {
     await new Promise((resolve, reject) => {
       const ticket = {resolve, reject, signal, abort: null};
-      ticket.abort = () => { this.waiters = this.waiters.filter(t => t !== ticket); reject(Error('Paused')); };
-      if (signal.aborted) return reject(Error('Paused'));
+      ticket.abort = () => { this.waiters = this.waiters.filter(t => t !== ticket); reject(new ToolkitError('Paused')); };
+      if (signal.aborted) return reject(new ToolkitError('Paused'));
       if (this.active < this.limit) { this.active++; resolve(); }
       else { this.waiters.push(ticket); signal.addEventListener('abort', ticket.abort, {once: true}); }
     });
-    try { if (signal.aborted) throw Error('Paused'); return await operation(); }
+    try { if (signal.aborted) throw new ToolkitError('Paused'); return await operation(); }
     finally {
       this.active--;
       while (this.waiters.length) {
@@ -49,6 +50,7 @@ class DownloadManager {
       if (!/^[a-f0-9]{32}\.json$/.test(name)) continue;
       try {
         const job = JSON.parse(fs.readFileSync(path.join(this.root, 'jobs', name), 'utf8'));
+        if (job.error) job.error = 'Previous download failed. Check the destination and remote connection before retrying.';
         if (!['complete','cancelled'].includes(job.status)) job.status = 'paused';
         this.jobs.set(job.id, job);
       } catch {}
@@ -68,12 +70,12 @@ class DownloadManager {
     });
   }
   async create({source, folder, concurrency=12}) {
-    if (this.closed) throw Error('Download manager is closing');
+    if (this.closed) throw new ToolkitError('Download manager is closing');
     if (typeof source!=='string' || !source.startsWith('/') || source.length>4096 || /[\x00-\x1f]/.test(source))
-      throw Error('Enter an absolute remote file path');
-    if (typeof folder!=='string' || !path.isAbsolute(folder) || folder.length>220) throw Error('Enter an absolute local folder path');
-    if (!Number.isInteger(concurrency) || concurrency<1 || concurrency>16) throw Error('Choose 1 to 16 connections');
-    if ([...this.jobs.values()].filter(j=>!['complete','cancelled'].includes(j.status)).length>=20) throw Error('Pause or finish an existing download first');
+      throw new ToolkitError('Enter an absolute remote file path');
+    if (typeof folder!=='string' || !path.isAbsolute(folder) || folder.length>220) throw new ToolkitError('Enter an absolute local folder path');
+    if (!Number.isInteger(concurrency) || concurrency<1 || concurrency>16) throw new ToolkitError('Choose 1 to 16 connections');
+    if ([...this.jobs.values()].filter(j=>!['complete','cancelled'].includes(j.status)).length>=20) throw new ToolkitError('Pause or finish an existing download first');
     folder=path.resolve(folder); fs.mkdirSync(folder,{recursive:true});
     const id=crypto.randomUUID().replaceAll('-',''), name=safeName(source), ext=path.extname(name), stem=name.slice(0,name.length-ext.length);
     let destination=path.join(folder,name), suffix=1;
@@ -84,10 +86,10 @@ class DownloadManager {
     this.start(job); return this.list().find(j=>j.id===id);
   }
   start(job) {
-    if (this.runs.has(job.id)) throw Error('This download is already running');
+    if (this.runs.has(job.id)) throw new ToolkitError('This download is already running');
     const controller=new AbortController();
     const promise=this.run(job,controller.signal).catch(error=>{
-      job.status=controller.signal.aborted?'paused':'error';job.error=controller.signal.aborted?null:String(error.message).slice(0,500);this.save(job);
+      job.status=controller.signal.aborted?'paused':'error';job.error=controller.signal.aborted?null:publicMessage(error, 'Download failed. Check file permissions and the remote connection.');this.save(job);
     }).finally(()=>{this.live.delete(job.id);this.runs.delete(job.id);});
     this.runs.set(job.id,{controller,promise});
   }
@@ -100,10 +102,10 @@ class DownloadManager {
       const handle=fs.openSync(job.partial,'wx');try{fs.ftruncateSync(handle,job.size);}finally{fs.closeSync(handle);}
       this.save(job);
     }
-    if(signal.aborted)throw Error('Paused');
-    if(!fs.existsSync(job.partial))throw Error('Partial file is missing. Create a new download.');
+    if(signal.aborted)throw new ToolkitError('Paused');
+    if(!fs.existsSync(job.partial))throw new ToolkitError('Partial file is missing. Create a new download.');
     const fd=fs.openSync(job.partial,'r+'), done=new Set(job.done);
-    if(fs.fstatSync(fd).size!==job.size){fs.closeSync(fd);throw Error('Partial file size changed. Create a new download.');}
+    if(fs.fstatSync(fd).size!==job.size){fs.closeSync(fd);throw new ToolkitError('Partial file size changed. Create a new download.');}
     const live={ranges:new Map(),start:Date.now(),initialBytes:[...done].reduce((n,i)=>n+Math.min(job.chunk,job.size-i*job.chunk),0)};
     this.live.set(job.id,live);job.status='downloading';job.error=null;this.save(job);
     const queue=Array.from({length:Math.ceil(job.size/job.chunk)},(_,i)=>i).filter(i=>!done.has(i));let cursor=0,failed=false;
@@ -114,7 +116,7 @@ class DownloadManager {
             await this.slots.run(signal,async()=>{
               live.ranges.set(index,0);
               try{await this.transport.read(job,offset,length,signal,(data,position)=>{
-                if(position<0||position+data.length>length)throw Error('Invalid byte range');
+                if(position<0||position+data.length>length)throw new ToolkitError('Invalid byte range');
                 fs.writeSync(fd,data,0,data.length,offset+position);live.ranges.set(index,position+data.length);
               });}finally{live.ranges.delete(index);}
             });success=true;break;
@@ -123,17 +125,17 @@ class DownloadManager {
           }
         }
         if(signal.aborted)return;
-        if(!success){failed=true;throw lastError||Error('Transfer interrupted');}
+        if(!success){failed=true;throw lastError||new ToolkitError('Transfer interrupted');}
         fs.fsyncSync(fd);done.add(index);job.done=[...done];this.save(job);
       }
     };
     let results;
     try{results=await Promise.allSettled(Array.from({length:job.concurrency},worker));}finally{fs.closeSync(fd);}
-    if(signal.aborted)throw Error('Paused');
+    if(signal.aborted)throw new ToolkitError('Paused');
     const error=results.find(r=>r.status==='rejected');if(error)throw error.reason;
     job.status='verifying';this.save(job);
-    const digest=crypto.createHash('sha256');for await(const block of fs.createReadStream(job.partial)){if(signal.aborted)throw Error('Paused');digest.update(block);}
-    if(digest.digest('hex')!==job.sha256)throw Error('Checksum failed. The partial file has been retained. Start a new download.');
+    const digest=crypto.createHash('sha256');for await(const block of fs.createReadStream(job.partial)){if(signal.aborted)throw new ToolkitError('Paused');digest.update(block);}
+    if(digest.digest('hex')!==job.sha256)throw new ToolkitError('Checksum failed. The partial file has been retained. Start a new download.');
     // Hard-link with exclusive destination semantics: never overwrite a file which appeared during transfer.
     try{fs.linkSync(job.partial,job.destination);}catch(error){
       if(!['EPERM','ENOTSUP','EACCES'].includes(error.code))throw error;
@@ -144,23 +146,23 @@ class DownloadManager {
     await this.options.onComplete?.(job).catch(()=>{});
   }
   async action(id,action) {
-    const job=this.jobs.get(id);if(!job)throw Error('Download not found');
+    const job=this.jobs.get(id);if(!job)throw new ToolkitError('Download not found');
     if(action==='pause'){
       const run=this.runs.get(id);if(run){run.controller.abort();await run.promise;}
     }else if(action==='resume'){
-      if(!['paused','error'].includes(job.status))throw Error('This download cannot be resumed');
-      if(this.runs.has(id))throw Error('Wait for the current operation to finish');
+      if(!['paused','error'].includes(job.status))throw new ToolkitError('This download cannot be resumed');
+      if(this.runs.has(id))throw new ToolkitError('Wait for the current operation to finish');
       this.start(job);
     }else if(action==='cancel'){
-      if(job.status==='complete')throw Error('Completed files are kept');
+      if(job.status==='complete')throw new ToolkitError('Completed files are kept');
       await this.action(id,'pause');
       try{await this.transport.cleanup(job);job.cleanupWarning=null;}catch{job.cleanupWarning='Transfer access cleanup pending; use Clear access.';}
       fs.rmSync(job.partial,{force:true});job.status='cancelled';this.save(job);
     }else if(action==='cleanup'){
-      if(this.runs.has(id))throw Error('Pause the download before clearing access');
+      if(this.runs.has(id))throw new ToolkitError('Pause the download before clearing access');
       await this.transport.cleanup(job);job.cleanupWarning=null;this.save(job);
       if(!['complete','cancelled'].includes(job.status)){job.status='cancelled';fs.rmSync(job.partial,{force:true});this.save(job);}
-    }else throw Error('Unknown action');
+    }else throw new ToolkitError('Unknown action');
     return this.list().find(j=>j.id===id);
   }
   async pauseAll(){await Promise.all([...this.runs.keys()].map(id=>this.action(id,'pause')));}

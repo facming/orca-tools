@@ -1,12 +1,11 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
-const runtime=require('./modules/downloads/runtime.cjs'),hub=require('./server.cjs');
+const runtime=require('./platform/index.cjs'),hub=require('./server.cjs');
 
 test('activation starts the complete GPU bridge without opening a browser',async()=>{
- const previousRuntime=runtime.windowsRuntime,previousServer=hub.startServer,previousLaunch=runtime.launch;
+ const previousRuntime=runtime.createRuntime,previousServer=hub.startServer;
  let starts=0,browserLaunches=0;const logs=[];
- runtime.windowsRuntime=()=>({local:'fixture'});
- runtime.launch=async()=>{browserLaunches++;};
+ runtime.createRuntime=()=>({platform:'win32',openUrl:async()=>{browserLaunches++;}});
  const service={url:'http://127.0.0.1:0/',controller:{settings:{gpu:{enabled:true}},gpu:{async open(){starts++;}}},async close(){}};
  hub.startServer=async()=>service;
  try{
@@ -15,13 +14,13 @@ test('activation starts the complete GPU bridge without opening a browser',async
   assert.equal(starts,1);assert.equal(browserLaunches,0);
   assert.ok(logs.some(line=>line.includes('ready')));
   await plugin.deactivate();
- }finally{runtime.windowsRuntime=previousRuntime;hub.startServer=previousServer;runtime.launch=previousLaunch;}
+ }finally{runtime.createRuntime=previousRuntime;hub.startServer=previousServer;}
 });
 
 test('disabled GPU module does not start services and startup failure keeps Toolkit usable',async()=>{
- const previousRuntime=runtime.windowsRuntime,previousServer=hub.startServer;
+ const previousRuntime=runtime.createRuntime,previousServer=hub.startServer;
  let starts=0;const logs=[];const commands=[];
- runtime.windowsRuntime=()=>({local:'fixture'});
+ runtime.createRuntime=()=>({platform:'win32'});
  const service={url:'http://127.0.0.1:0/',controller:{settings:{gpu:{enabled:false}},gpu:{async open(){starts++;throw Error('not installed');}}},async close(){}};
  hub.startServer=async()=>service;
  try{
@@ -32,5 +31,5 @@ test('disabled GPU module does not start services and startup failure keeps Tool
   assert.equal(starts,1);assert.ok(commands.includes('toolkit.open'));
   assert.ok(logs.some(line=>line.includes('GPU bridge startup failed')));
   await plugin.deactivate();
- }finally{runtime.windowsRuntime=previousRuntime;hub.startServer=previousServer;}
+ }finally{runtime.createRuntime=previousRuntime;hub.startServer=previousServer;}
 });

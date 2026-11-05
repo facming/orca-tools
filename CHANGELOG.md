@@ -1,5 +1,23 @@
 # Changelog
 
+## 2026-11-05 — macOS 目录选择修复 / Toolkit 1.3.2
+
+- 修复选择目录后 AppleScript 向只读 `selection` 属性赋值导致的 -10006 错误，改用局部变量接收目录 alias。
+- 新增实际调用系统 AppleScript 解释器的非交互回归测试，只替换目录对话框动作，验证返回路径、HTTP 保存、取消与失败保留、重启读取以及错误脱敏。含中文、空格、引号和美元符号的路径通过；恢复旧变量名可重现失败。
+- Mac 针对性测试 7 项通过，Windows 功能未测试。新版本已获用户批准并通过 Orca 官方界面更新、启用；用户配合点击系统对话框后，选中保存、刷新保留、原生取消三项实机复验通过。
+
+## 2026-11-05 — macOS Toolkit 管理页实机复验
+
+- 经用户批准，通过 Orca 官方界面更新并启用 `5e891a2`。确认 Downloads 预览提示、GPU 入口及 unsupported 状态、manifest 版本显示在实机生效。
+- 验证停用关闭管理端口和待处理的目录选择进程，重新启用可恢复。Mac 针对性测试 6 项通过，未执行 Windows 功能测试。
+- 记录尚未完成的原生目录选择保存与取消验收，以及 Orca 空闲 worker 回收导致管理页断开的已确认限制。
+
+## 2026-11-04 — macOS 移植阶段 1 开发记录
+
+- Toolkit 入口和管理服务共用平台 runtime。Mac 按运行中的 Orca 包、已审计的相对布局及 profile 定位 CLI 和 SDK，使用私有数据目录与系统 OpenSSH。
+- Mac 可打开 Accounts 和 Downloads 预览页面并选择本地目录。真实远程操作和 GPU 启动已在服务端关闭，Windows 保留原目录及 GPU 启动行为。
+- 新增平台和模拟激活测试。Apple Silicon 上全量 Node 套件 47 项通过、1 项 Windows 原生探针跳过。按用户确认，阶段 1 不测试 Windows 相关功能，不要求 Windows 实机补测。
+
 ## 2026-10-29 — Tripo Studio / MCP 1.7.1
 
 - GPU 模块加入 `tripo-local`：经桥调用本机的 Tripo Studio 会员账号（第三方插件 Ador-able/tripo-studio-mcp），工具列表运行时从桥上拉取，另有 `tripo_upload`、`tripo_download` 传文件。

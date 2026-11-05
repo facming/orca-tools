@@ -101,3 +101,74 @@ GPU 的主要代价在本地执行。安装器绑定 LOCALAPPDATA、`pythonw.exe
 3. 对路径空格/中文、CLI/SDK 缺失、替代 profile、权限拒绝、选择取消及子进程环境做离线测试。确保 Mac 能力缺失时关闭对应功能，避免入口顺带启动 GPU；在 Windows 上通过已有回归。阶段 1 的验收限于平台接口，Accounts 真实读取、下载和渲染分别在后续阶段执行。
 
 本次仅新增本报告。未安装、启用或批准插件，未使用真实账号或凭据，未创建密钥、监听、LaunchAgent，未修改应用包、TCC、PF、防火墙、Tailscale 或系统扩展。报告留在方案分支工作区，未暂存、提交、推送或创建 PR；等待 ChatGPT 审查及用户下一阶段指令。
+
+## 7. 阶段 1 实施记录（2026-11-04）
+
+本节基于阶段 0 提交 `e20df27`。Toolkit 现在使用同一个平台 runtime 初始化管理服务、Accounts、Downloads、目录选择和 GPU 模块。Windows 沿用原设置、下载任务及 GPU 安装目录，启用 GPU 时保留启动动作。Mac 管理页面仅监听 IPv4 回环，Accounts 和 Downloads 显示为预览。服务端拦截账号、远程浏览、传输和 GPU 管理操作，目录选择及本地偏好可以单独使用。
+
+| 检查对象 | 实现与证据 |
+| --- | --- |
+| CLI / SDK | 从实际 worker 可执行文件向上核对 app 的包标识，再对照 Spotlight 与系统、用户应用目录中的候选项。只在该包内使用第 2 节记录的相对布局，检查 CLI 执行权限及 SDK 的构造器和调用方法。无法识别宿主、发现多个安装或布局不兼容时停止初始化。 |
+| Profile | 显式覆盖须指向可访问的绝对目录。否则使用 SDK 默认值或已验证的 darwin 路径。复查当前构建的安装器发现，审核后的入口在 `<PROFILE>/plugins/local-tools.toolkit/<contentHash>/` 下。入口与默认 profile 不匹配时停止，避免从另一份 profile 查配对。真实宿主能否传递显式覆盖仍待核实。 |
+| 目录与进程 | 由 `os.homedir()` 推导 Toolkit 的 Application Support、Caches 和 Logs 路径。实际使用的私有数据目录以 0700 创建，拒绝属主不符、符号链接或组及其他用户可访问的目录。本地配置及目录偏好以 0600 创建。Mac 子进程仅继承指定环境字段，使用系统 OpenSSH，打开页面和目录均以参数数组调用系统 open。 |
+| 目录选择 | 在本版本公开的 worker API 和方法定义中未发现原生目录选择接口。使用固定 AppleScript，初始目录作为单独参数传入。取消与执行失败分别处理，选择结果只保存本地路径。 |
+| 错误处理 | 管理服务向页面返回固定诊断，屏蔽文件系统异常、解析异常和外部命令输出。下载错误的历史自由文本在加载时不再传给页面。 |
+
+**安全验证。** 在临时 HOME、隔离 profile 下，用本机 Orca 1.4.248 的随包 Node 成功解析 CLI 和 SDK，分别检查了显式覆盖和模拟安装目录下的 SDK 默认 profile。CLI 版本检查通过，官方离线插件校验为 valid，0 个错误，仍需人工审核。系统 AppleScript 编译器接受选择脚本。这些探针没有激活真实 worker、创建 SSH 密钥、连接远程环境或启动 GPU 进程。
+
+| Node.js 20.20.2 / Apple Silicon | 结果 |
+| --- | --- |
+| `node --test plugins/toolkit/test-platform.cjs` | 6/6 通过。包含临时 Windows 安装布局、Mac 路径及权限、多安装、SDK 导出与 profile、子进程参数、目录选择和模拟激活。 |
+| `node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs` | 共 48 项（含上述 6 项），47 通过，0 失败，1 跳过。模拟宿主注册 5 个命令，两个预览页面可访问，GPU 启动计数为 0。 |
+| Windows 专用集成测试 | 需要在已安装 Orca CLI 和系统 OpenSSH 的 Windows 上运行原生程序。该用例保留在全量套件中，仅在 Windows 上执行。本次通过的是 Windows 适配夹具及模拟 GPU 启动回归。 |
+
+**阶段 1 测试范围确认（2026-11-04）。** 用户确认本阶段不测试 Windows 相关功能。上表如实保留范围确认前在 Mac 上运行的夹具和模拟启动结果。Windows 原生探针未运行，Windows 功能不作为本阶段验收或合并条件，不安排补测。Windows 代码和已有测试用例继续保留，实机兼容性未经本次验证。
+
+**管理页验收反馈。** 人工截图显示 Overview 的 Downloads 卡片停留在 “Active transfers”，同页模块状态已为 preview。修正卡片的预览文案，并在 Downloads 表单内显示可见提示。使用临时数据目录和独立 Chrome 配置验证了两处实际渲染结果，下载按钮禁用，本地目录选择按钮可用。已安装插件的更新与复验仍需通过 Orca UI。
+
+**管理页逐项复核。** 实际 Orca 插件设置显示 Toolkit 1.3.1、本地来源、普通程序执行能力、桌面通知及五个命令。“Open Manager” 从获准 worker 打开回环管理页。旧界面将 GPU 显示为 Creative tools，页脚写死了 v1.2.1，总览刷新还会把 Accounts 的 preview 覆盖为 Unavailable。修复版导航注明 GPU projects 和 GPU workflows，Connected tools 标明 GPU。两个 GPU 子页显示 unsupported，隐藏启动操作。总览在预览模式下跳过账号计数和不支持的 GPU 查询，页脚版本取自 manifest。
+
+在独立数据目录的实际浏览器页面逐项验证了总览、Accounts、Downloads 和两个 GPU 入口。以替代选择器完成含中文和空格的目录选择、取消和刷新，路径保留。本机已安装版的 Downloads 按钮触发了真实 osascript 目录选择进程，未确认该次选择保存或原生取消结果。手动切换真实 Orca 插件开关至关闭后，再次确认管理端口拒绝连接，GPU 管理端口亦未监听。另观察到一次开关仍显示开启但管理端口已关闭，重新运行命令可恢复。当前 Orca 代码存在空闲 worker 回收机制，缺少本次具体退出原因的证据。
+
+**待审查及人工验收。** 本次复核时最新修复尚未安装；后续实机结果见第 8 节。非默认 profile、Intel Mac、配对握手、账号与远程下载、GPU 执行仍留待后续阶段。
+
+## 8. 获准更新后的实机复验（2026-11-05）
+
+用户明确批准 `5e891a2` 的本地来源 Toolkit 1.3.1 更新与启用。通过 Orca 官方界面的“从文件夹”流程安装，确认本地来源并启用，未修改安装数据库或绕过审核。新安装目录中的 48 个文件与该提交的插件源码逐一一致。以下结果来自真实 Orca worker 和实际管理页。
+
+| 检查项 | 结果 |
+| --- | --- |
+| 宿主启动与监听 | Open Manager 命令返回 ready，管理服务仅监听 IPv4 回环。 |
+| 总览及版本 | Accounts、Downloads 的卡片和模块状态均为 preview；页脚显示 v1.3.1。 |
+| Accounts | 页面显示 macOS preview，未展示或读取真实账号。 |
+| Downloads | 表单内显示 macOS preview；远程浏览、Start download、Pause all 禁用，本地目录选择按钮可用。 |
+| GPU | 侧栏显示 GPU projects、GPU workflows，总览明确显示 GPU unsupported；两个子页均显示 macOS 不支持，未提供启动按钮。宿主 GPU Workflows 命令返回管理页 workflows 地址，GPU 管理端口未监听。 |
+| 真实目录选择 | 向初始目录传入含中文和空格的空测试目录，确认 worker 启动系统 osascript。自动化工具未暴露该系统对话框的可操作目标，未完成原生选择保存、取消和刷新保留的实机验收。替代选择器的既有测试不能替代此项。 |
+| 停用与恢复 | 在原生选择器等待期间通过 Orca 开关停用插件，确认管理端口拒绝连接，原 worker 和该 osascript 子进程退出；GPU 管理端口仍未监听。随后重新启用并运行 Open Manager，管理页恢复。 |
+| 空闲生命周期 | Orca 插件日志明确记录 `worker reaped after idle period`，确认此前开关开启但页面断开的一次原因为宿主空闲回收。长期驻留验收未通过；当前可重新执行 Open Manager 恢复。需后续审查宿主支持的生命周期方案，不以伪造活动绕过回收。 |
+
+针对 Mac 平台、模拟激活和统一页面重新运行以下测试：6 通过、0 失败、3 个不匹配用例跳过。Windows 用例未执行，继续遵循第 7 节范围排除。
+
+```sh
+node --test --test-name-pattern='^(running macOS|missing, non-executable|profile override|open and folder selection|macOS activation|all views share one shell)' plugins/toolkit/test-unified-ui.cjs plugins/toolkit/test-platform.cjs
+```
+
+本轮未调用真实 Accounts RPC，未执行远程下载、生成密钥或启动 GPU/ComfyUI，也未修改 TCC 或其他系统安全设置。原生目录选择的保存、取消、刷新保留及 TCC 拒绝仍需可操作的系统对话框验收；不能宣称阶段 1 实机验收全部通过。
+
+## 9. 人工目录选择失败与修复（2026-11-05）
+
+用户实际打开系统目录对话框并选择含中文、空格的测试目录后，页面返回 “The folder selection window could not finish.”，此项验收失败。非交互探针复现了 `set selection to <directory alias>` 的 AppleScript -10006 错误：`selection` 与只读属性冲突，故障发生在选择结果赋值处，尚未进入配置写入。此前仅编译脚本及替代 Node 子进程回执的测试未覆盖此运行时错误。
+
+Toolkit 1.3.2 改用 `chosenFolder` 接收 alias，并将交互命令分离为固定的 `requestFolder` handler。仍由固定脚本接收 argv，不拼接用户路径。新增 `test-macos-directory-picker.cjs`：测试脚本继承生产 `run` handler，仅替换需要点击的目录选择动作，由系统 osascript 执行真实的赋值、alias 转换和异常处理，再通过管理 HTTP 路由验证保存、取消与失败不改配置、重启后读取及 0600 配置权限。路径含中文、空格、引号及美元符号；原始错误继续脱敏。
+
+同一回归测试在临时源码副本恢复旧 `selection` 变量后按预期失败；修复后通过，生产脚本编译成功。以下套件结果为 7 通过、0 失败、3 跳过，Windows 用例未执行：
+
+```sh
+node --test --test-name-pattern='^(macOS AppleScript|running macOS|missing, non-executable|profile override|open and folder selection|macOS activation|all views share one shell)' plugins/toolkit/test-macos-directory-picker.cjs plugins/toolkit/test-platform.cjs plugins/toolkit/test-unified-ui.cjs
+```
+
+用户随后明确批准 `1a5f3ee` 的 1.3.2 更新。已通过 Orca 官方界面确认本地来源、安装并启用，49 个插件文件与该提交一致，实际页面显示 v1.3.2，GPU 管理端口未监听。本地数据目录权限为 0700。
+
+**人工配合实机复验通过。** 从新版 Downloads 打开真实系统目录窗口，由用户点击选取含中文及空格的测试目录；页面返回 “Download folder selected.”，刷新后路径保留，生成的目录偏好文件权限为 0600。再次打开窗口并由用户点击取消，等待提示消失、Browse 按钮恢复，原目录不变；再刷新确认仍保留。此前“选中目录即报错”的故障不再出现，选中保存、刷新保留、原生取消三项通过。
+
+上述结果来自用户点击原生对话框及自动化读取页面回执，区别于仅替代对话框的自动测试。TCC 拒绝行为仍未验证。第 8 节已确认的宿主空闲回收限制未在此次修复中处理。
