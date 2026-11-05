@@ -1,4 +1,4 @@
-"""macOS service/CLI, restricted to a trusted, managed ComfyUI installation."""
+"""macOS service/CLI for trusted managed ComfyUI and opt-in Godot."""
 import sys
 from pathlib import Path
 # LaunchAgent uses -I: add only this installed, owner-private application directory.
@@ -25,8 +25,10 @@ def load_config(file, adapter):
     token = read_token(adapter.root)
     if config.get('platform') != 'darwin' or config.get('data_dir') != str(adapter.root):
         raise ValueError('Invalid macOS bridge configuration.')
-    if config.get('native') or config.get('tripo'):
-        raise ValueError('Native engines are unsupported on macOS.')
+    if config.get('tripo'):
+        raise ValueError('Tripo is unsupported on macOS.')
+    from bridge_platform.macos_godot import validate_settings
+    validate_settings(config.get('native') or {})
     if config.get('comfy_url') != 'http://127.0.0.1:8188' or config.get('port') != 18772 or config.get('admin_port') != 18773:
         raise ValueError('Unexpected macOS service endpoints.')
     config['token'] = token
@@ -127,7 +129,10 @@ def health(bridge, process):
         checks['comfyui'] = process.healthy_owned() and bridge.adapters['comfyui.workflow'].status()['online'] is True
     except Exception:
         pass
-    return {'platform': 'darwin', 'capability': 'comfyui', 'ready': all(checks.values()), 'checks': checks, **process.backend}
+    result = {'platform': 'darwin', 'capability': 'comfyui', 'ready': all(checks.values()), 'checks': checks, **process.backend}
+    api_healthy = all(v for k, v in checks.items() if k != 'comfyui')
+    result['godot'] = bridge.native.status(api_healthy) if bridge.native else {'state': 'unsupported', 'checks': {}}
+    return result
 
 
 def start_admin(bridge, process, port=18773, security=None):
@@ -156,7 +161,7 @@ def start_admin(bridge, process, port=18773, security=None):
                 return self.reply(403, {'error': 'Access denied.'})
             if self.command == 'GET' and self.path == '/':
                 html = '''<!doctype html><meta charset="utf-8"><title>GPU Workflows</title>
-<h1>ComfyUI Bridge</h1><p>macOS supports managed ComfyUI only. Custom nodes and API nodes are disabled.</p>
+<h1>ComfyUI Bridge</h1><p>ComfyUI and explicitly configured Godot are managed independently. Godot project execution requires user authorization; it is not sandboxed. Custom ComfyUI nodes and API nodes are disabled.</p>
 <button id="refresh">Refresh</button><button id="start">Start ComfyUI</button><button id="stop">Stop managed ComfyUI</button><pre id="state"></pre>
 <script nonce="''' + session + '''">const token="''' + session + '''";
 async function show(action){const r=await fetch('/api/'+action,{method:['start','stop'].includes(action)?'POST':'GET',headers:{'X-Admin-Token':token,'Content-Type':'application/json'},body:['start','stop'].includes(action)?'{}':undefined});document.getElementById('state').textContent=JSON.stringify(await r.json(),null,2);}
@@ -272,7 +277,12 @@ def serve(config, adapter, interval=1):
                     if monitor:
                         monitor.join(timeout=10)
                 finally:
-                    process.stop(final=True)
+                    try:
+                        if bridge.native:
+                            bridge.native.close()
+                    finally:
+                        process.stop(final=True)
+
 
 
 def main():

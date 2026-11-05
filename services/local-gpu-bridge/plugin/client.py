@@ -54,9 +54,13 @@ NATIVE_COMMON = [
     tool('fetch_native_artifact','Download a registered native render artifact to an exclusive file on the VPS and verify SHA-256. Failed batches with result.partial_success=true retain successful artifacts; download these and retry only result.failed_screenshots.',{'job_id':STR,'index':{'type':'integer'},'destination_dir':STR},['job_id','index'],False)
 ]
 GODOT_TOOLS = NATIVE_COMMON + [
-    tool('run_project_script','Execute a synchronized project GDScript, including tools/shots.gd screenshot galleries. Project script access and native network isolation are required. user_args follow --; use project_subdir=client for a client-rooted script. output_paths selects generated project artifacts to collect (default docs/shots). Gallery Godot/Go/server process calls are brokered; no generic shell is exposed.', {'project_id':STR,'script':STR,'user_args':{'type':'array','items':STR},'timeout_seconds':{'type':'integer'},'output_paths':{'type':'array','items':STR},'project_subdir':STR,'headless':{'type':'boolean'},'request_id':STR},['project_id','script'],False),
-    tool('capture_scene','Run an existing scene from the approved local Godot project using its GPU, then capture a PNG. Supports scene-specific user_args such as --outfits and --view; these follow the Godot -- separator. Use run_project_script for project screenshot galleries or custom GDScript. Project scripts run locally; only synchronize trusted project code. Requires native network isolation.',
-         {'project_id':STR,'scene':STR,'width':{'type':'integer'},'height':{'type':'integer'},'wait_seconds':{'type':'number'},'user_args':{'type':'array','items':STR},'renderer':{'type':'string','enum':['forward_plus','mobile','gl_compatibility']},'request_id':STR},['project_id'],False)
+    tool('godot_operation', 'Open, run or headless-import an approved Godot project on macOS. Requires local allow_scripts and explicit authorized=true from the user. Code runs as the login user without a sandbox. Returns a task ID; timeout also bounds editor sessions.', {'project_id':STR, 'operation':{'type':'string','enum':['open','run','import']}, 'arguments':{'type':'object'}, 'authorized':{'type':'boolean'}, 'request_id':STR}, ['project_id','operation','authorized'], False),
+    tool('godot_stop', 'Stop only tasks started by this Bridge for the project. External processes are untouched.', {'project_id':STR}, ['project_id'], False),
+    tool('godot_cancel', 'Cancel one managed Godot task, including a running task.', {'job_id':STR}, ['job_id'], False),
+    tool('godot_logs', 'Read bounded fixed Godot task diagnostics. Raw application logs are suppressed for privacy.', {'job_id':STR}, ['job_id']),
+    tool('run_project_script','Execute a synchronized project GDScript, including tools/shots.gd screenshot galleries. Project script access is required. Windows requires network isolation; macOS requires explicit authorized=true and provides no sandbox. user_args follow --; use project_subdir=client for a client-rooted script. On Windows output_paths defaults to docs/shots and gallery Godot/Go/server calls are brokered. On macOS declare new PNG files explicitly, project_subdir must match local configuration, and no Go/server broker is exposed; no generic shell is exposed.', {'authorized':{'type':'boolean'},'project_id':STR,'script':STR,'user_args':{'type':'array','items':STR},'timeout_seconds':{'type':'integer'},'output_paths':{'type':'array','items':STR},'project_subdir':STR,'headless':{'type':'boolean'},'request_id':STR},['project_id','script'],False),
+    tool('capture_scene','Run an existing scene from the approved local Godot project using its GPU, then capture a PNG. Supports scene-specific user_args such as --outfits and --view; these follow the Godot -- separator. Use run_project_script for project screenshot galleries or custom GDScript. Project scripts run locally; only synchronize trusted project code. Windows requires native network isolation; macOS requires explicit authorized=true and local allow_scripts and provides no sandbox.',
+         {'authorized':{'type':'boolean'},'project_id':STR,'scene':STR,'width':{'type':'integer'},'height':{'type':'integer'},'wait_seconds':{'type':'number'},'user_args':{'type':'array','items':STR},'renderer':{'type':'string','enum':['forward_plus','mobile','gl_compatibility']},'request_id':STR},['project_id'],False)
 ]
 BLENDER_TOOLS = NATIVE_COMMON + [
     tool('blender_operation','Control the dedicated local Blender instance using typed operations or Python. execute_code {code,parameters?} executes Python with bpy, project_root, parameters; returns filtered result JSON (set result=...), bounded messages and diagnostics; output_paths registers project-relative generated files as downloadable artifacts; run_script {path,user_args?,parameters?} runs a synchronized project .py file. Script access must be enabled. No generic shell tool. Arguments: scene_info {} returns objects and capabilities.vrm_import/vrm_export; open/save {path relative to project, replace? for save}; import_asset {path, including .vrm with the installed VRM extension}; export_asset {path .glb, .obj or .vrm,replace?}; create_primitive {kind:cube|sphere|plane|cylinder|cone|torus|monkey,name?,location?,rotation?,scale?}; set_transform {name,location?,rotation?,scale?}; set_material {name,color:[r,g,b,a],roughness?,metallic?}; set_camera {location,target?,lens?}; delete_object {name}; render {engine:cycles|eevee,width?,height?,samples?}. Vectors have three numbers; rotations are radians. viewport_capture {width?,height?} captures only the 3D viewport. batch {steps:[{operation,arguments}],continue_on_error?,timeout_seconds?} runs up to 32 sequential steps, preserves successful artifacts and reports progress. Nested batches are not supported. Returns a task id. Requires native network isolation.',
@@ -221,6 +225,16 @@ class Client:
             return download_receipt(target, size, digest.hexdigest())
         finally: partial.unlink(missing_ok=True)
     def call(self, name, args):
+        if name == 'godot_operation':
+            body = dict(args, engine='godot')
+            body.setdefault('request_id', uuid.uuid4().hex)
+            return self.request('/v1/native/jobs', body)
+        if name == 'godot_stop':
+            return self.request('/v1/native/godot-stop', args)
+        if name in ('godot_cancel', 'godot_logs'):
+            if not re.fullmatch('[a-f0-9]{32}', args['job_id']):
+                raise ValueError('Invalid job id.')
+            return self.request('/v1/native/jobs/' + args['job_id'] + ('/cancel' if name == 'godot_cancel' else '/logs'), {} if name == 'godot_cancel' else None)
         if name in ('unity_start','unity_stop','unity_tools','unity_call'):
             return self.request('/v1/unity/'+name[6:],args)
         if name=='tripo_upload':return self.tripo_upload(args)
@@ -248,6 +262,7 @@ class Client:
         if name in ('capture_scene','run_project_script','blender_operation'):
             body={'project_id':args['project_id'],'engine':'blender' if name=='blender_operation' else 'godot','operation':('capture' if name=='capture_scene' else 'script') if name!='blender_operation' else args['operation'],
                   'arguments':{k:v for k,v in args.items() if k in ('scene','width','height','wait_seconds','renderer','user_args')} if name=='capture_scene' else {k:v for k,v in args.items() if k in ('script','user_args','timeout_seconds','output_paths','project_subdir','headless')} if name=='run_project_script' else args.get('arguments',{}),'request_id':args.get('request_id') or uuid.uuid4().hex}
+            if 'authorized' in args and name != 'blender_operation':body['authorized'] = args['authorized']
             try:return self.request('/v1/native/jobs',body)
             except ValueError as e:raise ValueError(str(e)+' request_id='+body['request_id']) from None
         if name == 'gpu_status': return self.request('/v1/status')

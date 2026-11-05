@@ -57,7 +57,7 @@ class Controller {
   return {settings:this.settings,error:this.settingsError,modules:{
    accounts:{enabled:this.settings.accounts.enabled,status:!this.settings.accounts.enabled?'disabled':preview?this.accountAvailability:this.settings.accounts.environment?'configured':'needs-setup',manualRefresh:preview,error:this.accountError,accountCount:this.accountSnapshot?.accounts.length??null},
    downloads:{enabled:this.settings.downloads.enabled,status:!this.settings.downloads.enabled?'disabled':this.downloadAvailability||'needs-setup',available:!!this.downloads,error:this.downloadError,jobs:this.downloads?.list().length||0},
-   gpu:{enabled:this.settings.gpu.enabled,status:!this.settings.gpu.enabled?'disabled':gpu.online?'ready':'offline'}
+   gpu:{...(this.runtime.platform==='darwin'?{godot:gpu.godot||{state:'error'}}:{}),enabled:this.settings.gpu.enabled,status:!this.settings.gpu.enabled?'disabled':gpu.online?'ready':'offline'}
   }};
  }
  requireDownloads(){if(!this.downloads||!this.settings.downloads.enabled)throw new ToolkitError(this.downloadError||'Configure and enable Downloads first.');return this.downloads;}

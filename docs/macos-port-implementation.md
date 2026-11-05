@@ -179,3 +179,78 @@ Bridge 启动前要求 Tailscale `BackendState=Running`、Self 在线、指定�
 管理服务只监听 127.0.0.1，检查 Host、会话 token、Origin 和固定路由；远程 Bearer 不写入 HTML。Toolkit 读私有 token 后调用 `/api/health`。只有 installed、launch_agent、tailscale、token、peers、comfyui 六项均真且受管进程及 `/queue` 实际通过时显示 ready。launcher 存在不能判定 ready，token 权限异常、服务/ComfyUI 离线时为 offline。Mac 不自动运行 Windows launcher/native；Toolkit activation 不自动启动 GPU。
 
 没有 Job Objects/Windows Firewall 等价承诺，没有 PF、全局防火墙、通用 shell 或远程脚本接口。原 VPS 客户端的 metadata privacy prerequisite 不变；本阶段没有修改真实 VPS 权限。真实安装、可信代码选择、Tailscale 配置、私密 client export 传输及 GPU 渲染仍等待 ChatGPT 审查和人工批准。
+
+## 9. 阶段 5A Godot：实施前复用清单（2026-11-05）
+
+| 文件 | 审计结论与复用边界 |
+| --- | --- |
+| `native_control.py` | 复用项目 ID、`engine/operation/arguments/request_id` 任务信封及状态/产物语义；不实例化 Windows NativeControl，不复用自动 Git reset、同步或任意脚本代理。 |
+| `native_process.py` | Windows Job Objects、PowerShell/COM 出站校验保持原样；macOS 单独持有 Popen 子进程，不接管保存的 PID 或外部编辑器。 |
+| `bridge.py` | 保留认证、逐请求网络校验、ComfyUI 路由；Mac 原生路由采用显式 allowlist，其他操作返回 unsupported。 |
+| `native_blender.py` | 仅参考异步任务、超时和产物登记结构；不导入 bpy，不变更 Blender 行为。 |
+| `native_godot.gd` | 复用 SceneTree 场景截图脚本；Mac 不使用 Windows 离屏位置参数，不宣称桌面截图或无头 GPU 截图。 |
+| `plugin/client.py` | 复用项目列表、任务状态/等待与产物下载；增加 Godot open/run/stop/logs 和显式脚本授权字段，不更改 ComfyUI tools。 |
+| `install-local-gpu.py` / Windows settings | Windows 使用配置 exe、复制托管 exe、Job Objects 和防火墙；全部保留。Mac 接受已有 app bundle 或明确配置的原生 Mach-O 文件，不复制/安装 Godot。 |
+| `bridge_platform/macos.py` / `macos_service.py` | 扩展现有平台工厂和健康状态；Godot 与 ComfyUI 子进程、可用性独立。网络与 Token 安全门槛继续共用。 |
+| Toolkit `gpu-macos.cjs` / panel | 保留 ComfyUI 六项 ready 检查；单独呈现 Godot installed/available/running/unsupported/error。 |
+
+### 配置、发现和授权
+
+Mac 安装 settings 可增加可选 `native`；字段与 Windows 的 `godot_executable/projects` 命名一致，但 Mac 严格拒绝其他引擎、Git 自动同步和通用执行配置。已经安装的 Godot 无需重新安装。以下全为占位路径，须人工选择可信安装和测试项目：
+
+```json
+{
+  "native": {
+    "godot_executable": "/path/to/trusted/Godot.app",
+    "projects": [{
+      "id": "approved-game",
+      "root": "/path/to/approved/project",
+      "godot_subdir": "client",
+      "enabled": true,
+      "allow_scripts": true
+    }]
+  }
+}
+```
+
+`godot_subdir` 默认空字符串（项目根）；Windows 原有默认值不变。应用 bundle 根据 Info.plist 解析可执行文件；也可明确指定原生二进制。禁止配置路径/祖先符号链接、可执行文件组/其他人可写、无执行权限及非原生 arm64 Mach-O。当前支持 native arm64 的 Godot **4.5+ stable、major 4 编辑器**（含 universal arm64）；Intel/Rosetta、3.x、4.4 及更早版本、开发版本和 export template 为 unsupported。`--version` 与 `--help` 均在最小环境下限时检查；还须确认 editor/import/headless/recovery-mode 参数实际存在，不能仅凭文件名或版本声明 available。
+
+依据 [Godot 4.5 命令行文档](https://docs.godotengine.org/en/4.5/tutorials/editor/command_line_tutorial.html)：macOS 从 bundle 内二进制启动；未知参数会被忽略，因此能力探针必须验证参数支持。`--recovery-mode` 用于导入前检查，不能理解为运行项目时的安全沙箱。
+
+```sh
+python3 scripts/install-local-gpu-macos.py discover-godot
+python3 scripts/install-local-gpu-macos.py discover-godot --godot-search-dir /path/to/apps
+python3 scripts/install-local-gpu-macos.py discover-godot --godot-executable /path/to/trusted/binary
+```
+
+发现只读取候选元数据，不执行二进制、不修改配置，也不授权候选。默认只查系统/用户 Applications，可指定任意已安装位置；不假定实际安装路径。健康探针只执行**已经明确配置**的二进制。安装器继续先预览；新增 native 会显示在预览中，不下载或复制 Godot，不运行项目。
+
+现有阶段 4 安装和保留数据不会被安装器覆盖。本轮没有对真实安装执行升级；既有安装更新须在审查后人工停止服务、备份并核对应用代码和私有配置，再显式启动。不得把本实现当成已完成实机部署或自动无损升级工具。
+
+### 任务和进程
+
+| 操作 | Mac API / 行为 |
+| --- | --- |
+| 项目列表/状态 | 复用 `GET /v1/native/projects`、`GET /v1/native/status`；只返回 ID 与有效项目能力，不输出本地绝对路径。 |
+| open/run/import | `POST /v1/native/jobs`，`engine=godot`，相应 operation；MCP `godot_operation`。open 启动编辑器，run 运行主场景或指定 scene，import 使用 headless editor recovery-mode。 |
+| script/capture | 复用 `run_project_script` / `capture_scene` 和原任务信封；增加顶层 `authorized:true`。script 默认 headless；capture 复用 `native_godot.gd`，需要 GUI/rendering 会话，不伪造 headless 截图成功。 |
+| 状态/等待 | 复用 `native_job_status` / `wait_native_job`；状态为 queued/running/succeeded/failed/cancelled。记录退出码；超时为 failed + timed_out。 |
+| stop/cancel | MCP `godot_stop` → `POST /v1/native/godot-stop`；`godot_cancel` → `POST /v1/native/jobs/{id}/cancel`。只作用于本实例持有的子进程。 |
+| 日志 | `godot_logs` → `GET /v1/native/jobs/{id}/logs`；返回固定生命周期诊断，原始 stdout/stderr 与引擎 log-file 丢弃，不返回用户路径、异常文本或脚本输出。此为刻意限制，不能宣称完整应用日志。 |
+| 产物 | 复用 `fetch_native_artifact` 和 `/v1/native/artifacts/{id}/{index}`；本阶段只开放验证后的 PNG。 |
+
+所有项目操作（包括 open/import）都要求本地 `enabled:true`、`allow_scripts:true` 和每次请求 `authorized:true`；客户端不会自动设置授权。没有通用 shell、远程可执行文件选择、原生文件下载、自动 Git reset/pull、同步上传或 Go/server broker。其余原生路由返回 HTTP 404 + `code:unsupported`。旧 Windows capture/script 请求不带新字段时保持原格式；ComfyUI tools 和请求格式完全不变。
+
+项目在配置加载时登记 canonical root、device/inode；每次提交/执行核对身份，验证 project.godot、相对 scene/script，并扫描项目拒绝符号链接（最多十万条目）。真实 Godot 任务会按其正常行为导入资源/写入 `.godot`，编辑器可保存项目；仅应授权专用可信副本。本轮测试从未执行真实 Godot，也未触碰用户项目。
+
+启动使用参数数组、shell=false、新 session，HOME/TMPDIR 指向独立任务目录，PATH 固定系统目录；不继承 DYLD、Python、Token、SSH agent 等变量。每个项目最多一个受管任务，其他项目和 ComfyUI 独立。默认超时 120 秒，范围 1–3600 秒，含导入和实际任务；编辑器也受此限制。保存 PID、启动时间、项目身份和用户授权标记，但远程状态不公开 PID/本机 inode。
+
+仅在内存持有的 Popen 子进程仍存活时向其 session 进程组发送 TERM，必要时 KILL；不扫描/接管/终止外部 Godot，不根据落盘 PID 发信号。重启将未完成任务标记失败且结果未知，不自动重投；相同 request_id 不重复执行，不同内容复用 ID 拒绝。服务正常退出/安全监测失败时关闭 Godot 与 ComfyUI。损坏或不安全的 Godot 任务存储仅禁用 Godot，ComfyUI 继续使用原检查。
+
+**不构成沙箱。** 路径/链接校验限制 Bridge 的输入输出；无法约束用户授权脚本自行访问其他文件、网络、调用 OS API 或在执行中改变文件。最小环境变量也不移除当前用户权限。进程组不是 Windows Job Objects，不能保证终止已脱离 session 的后代；SIGKILL/断电可能遗留进程，重启不接管，需人工检查。Mac 永不报告 Network privacy ready/出站隔离成功。
+
+### 产物与独立状态
+
+截图只读取此任务的输出；脚本 `output_paths` 须显式指定最多 16 个尚不存在的项目相对 PNG 文件，不覆盖/登记已有文件。产物上限 32 MiB、尺寸最大 4096×4096，校验 PNG 签名、块 CRC、IHDR、解压尺寸/过滤字节与完整结束，支持 8-bit RGB/RGBA 非交错 PNG。目录描述符逐层 O_NOFOLLOW 打开，拒绝符号链接、硬链接、非普通文件；复制到私有任务目录并登记大小/SHA-256，下载重新校验并从已验证字节发送。其他格式明确 unsupported。媒体自身可能承载脚本生成的信息，PNG 格式检查不构成内容脱敏沙箱。
+
+Toolkit 面板独立显示 Godot `installed/available/running/unsupported/error`。只有安装、路径、权限、版本、arm64 与 Bridge API 安全健康全部通过才报告 available/running；Bridge 健康仍依赖 LaunchAgent、私有配置/token、Tailscale 和 peer，**不依赖 ComfyUI 运行**。Bridge 不健康时已核验 Godot 只报告 installed；探针错误为 error，未配置/不兼容为 unsupported。ComfyUI 六项 ready 检查保持不变。

@@ -1,4 +1,4 @@
-"""User-level macOS ComfyUI capabilities. No shell, PF, or native script API."""
+"""User-level macOS capabilities. Godot is opt-in; no shell or PF API."""
 import ipaddress
 import json
 import os
@@ -125,7 +125,7 @@ def probe_python(python, run=subprocess.run):
 
 
 class MacOSPlatform(Platform):
-    comfy_only = True
+    restricted_native = True
 
     def __init__(self, home=None, run=subprocess.run):
         self.home = Path(home or Path.home())
@@ -136,6 +136,12 @@ class MacOSPlatform(Platform):
         self.run = run
 
     def native_controls(self, config, save_config):
+        if config.get("native"):
+            from .macos_godot import GodotControl, UnavailableGodot
+            try:
+                return GodotControl(config), None
+            except Exception:
+                return UnavailableGodot(), None
         return None, None
 
     def tailscale(self, config):

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-05 — macOS Godot 阶段 5A
+
+- 新增独立 Mac Godot adapter：元数据发现已有 app/明确指定二进制、arm64/Mach-O/权限与 Godot 4.5+ stable major 4 编辑器能力检查；不安装或复制用户 Godot。
+- 复用 native MCP 任务/状态/PNG 下载，支持打开、运行、headless import/script、场景截图、停止、取消及固定诊断日志。执行需本地项目许可和每请求显式用户授权；无通用 shell、自动 Git 同步或 Windows Job Objects/出站沙箱等价声明。
+- 独立持有进程、记录身份和退出状态，超时/取消只终止本实例子进程；重启不接管历史 PID、不自动重投未知任务。产物限制为经过路径/链接、PNG 和 SHA-256 校验的 PNG。
+- Toolkit Mac 面板分别显示 Godot installed/available/running/unsupported/error；ComfyUI 六项 ready、安全检查和原 Windows 实现保留。未开放能力明确 unsupported。
+- 新增 30 项 Godot Mock 测试和 2 项 Node 状态回归；使用临时项目、合成可执行文件头/PNG 与 Mock 进程，未执行真实 Godot/用户脚本、修改用户项目或部署实际服务。真实图形、版本、信号和权限验收待 ChatGPT 审查及人工批准。
+
 ## 2026-11-05 — PR #5 安全边界追加修复
 
 - 对已有网络安全修复复核：Tailscale 目标地址须唯一且位于 UP/RUNNING 的 utun，拒绝停用/重复接口；ComfyUI listener 检查与启停串行化，后台网络监测不被启动锁阻塞。
