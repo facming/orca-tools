@@ -1,4 +1,4 @@
-import base64, json, pathlib, sys, tempfile, textwrap, unittest, unittest.mock, shutil, subprocess
+import os, base64, json, pathlib, sys, tempfile, textwrap, unittest, unittest.mock, shutil, subprocess
 import native_tripo
 from native_tripo import TripoControl, REGIONS
 
@@ -92,6 +92,7 @@ if(legacy().concurrency_limit!==3)throw Error('Legacy concurrency was not clampe
         uploaded = self.control.upload('image.png', base64.b64encode(b'png').decode())
         self.assertRegex(uploaded['path'], r'^tripo:inputs/[a-f0-9]{32}-image\.png$')
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows Tripo filesystem encoding; macOS Tripo is unsupported')
     def test_legacy_upload_handles_are_opaque_and_still_downloadable(self):
         folder = self.control.roots['inputs']; folder.mkdir(parents=True)
         old = '20261029-031037-concept.png'; (folder / old).write_bytes(b'png')
@@ -140,6 +141,7 @@ if(legacy().concurrency_limit!==3)throw Error('Legacy concurrency was not clampe
         self.assertEqual(json.loads(json.loads(self.control.to_handles(nested))['text'])['gallery_files'], [handle])
         with self.assertRaises(ValueError): self.control.file('tripo:archive/files/unknown/model-1')
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows Tripo filesystem encoding; macOS Tripo is unsupported')
     def test_paths_cross_as_handles(self):
         upload = self.control.upload('concept.png', base64.b64encode(b'png').decode())
         self.assertTrue(upload['path'].startswith('tripo:inputs/'))

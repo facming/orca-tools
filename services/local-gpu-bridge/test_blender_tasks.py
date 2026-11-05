@@ -10,7 +10,7 @@ class Guard:
 class BlenderTasks(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
-        self.root=pathlib.Path(self.temp.name);self.spool=self.root/'spool';self.spool.mkdir();self.out=self.root/'out';self.out.mkdir()
+        self.root=pathlib.Path(self.temp.name).resolve();self.spool=self.root/'spool';self.spool.mkdir();self.out=self.root/'out';self.out.mkdir()
         self.config={'data_dir':str(self.root/'bridge'),'native':{'projects':[{'id':'test','name':'Test','root':str(self.root),'enabled':True,'allow_scripts':True}]}}
         self.control=NativeControl(self.config,guard=Guard())
         source=ast.parse(pathlib.Path(__file__).with_name('native_blender.py').read_text(encoding='utf-8'))

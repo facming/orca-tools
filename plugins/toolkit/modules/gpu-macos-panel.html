@@ -1,0 +1,8 @@
+<!doctype html><title>GPU Workflows</title><style>main{padding:24px}button,a{margin-right:16px}pre{white-space:pre-wrap}</style><main>
+<h1>ComfyUI on Mac</h1><p>Use the local manager to start or stop managed ComfyUI. Custom nodes and API nodes are disabled. Native GPU engines are unsupported.</p>
+<a href="http://127.0.0.1:18773/" target="_blank" rel="noopener">Open ComfyUI manager</a><button id="refresh">Refresh workflows</button>
+<p id="state">Checking Bridge…</p><pre id="catalog"></pre></main><script nonce="__TOKEN__">
+const token='__TOKEN__';
+async function refresh(){try{const headers={'X-Admin-Token':token};const s=await fetch('/api/status',{headers});const state=await s.json();document.getElementById('state').textContent='ComfyUI: '+state.modules.gpu.status;const r=await fetch('/api/workflows',{headers});const data=await r.json();if(!r.ok)throw Error(data.error);document.getElementById('catalog').textContent=(data.workflows||[]).map(w=>(w.name||w.id)+' · '+(w.available?'Available':'Unavailable')).join('\n');}catch(e){document.getElementById('catalog').textContent=e.message;}}
+document.getElementById('refresh').onclick=refresh;refresh();
+</script></html>

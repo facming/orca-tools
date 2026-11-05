@@ -13,7 +13,7 @@ test('macOS initialization, page opens, passive GETs and status never construct 
   await fetch(f.server.url+'accounts/');await f.request('accounts/open',{});
   assert.equal((await f.request('accounts')).body.requiresRefresh,true);
   const status=(await f.request('status')).body;
-  assert.equal(status.modules.accounts.status,'preview');assert.equal(status.modules.downloads.status,'needs-setup');assert.equal(status.modules.gpu.status,'unsupported');
+  assert.equal(status.modules.accounts.status,'preview');assert.equal(status.modules.downloads.status,'needs-setup');assert.equal(status.modules.gpu.status,'offline');
  }
  assert.equal(f.loads,0);assert.equal(f.calls.length,0);
  const result=await f.request('accounts/refresh',{});assert.equal(result.status,200);

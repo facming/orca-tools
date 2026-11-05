@@ -170,9 +170,13 @@ class Tests(unittest.TestCase):
   guard=EgressGuard({'godot_executable':str(exe)})
   addresses=[str(ipaddress.ip_network(s).with_netmask) if ':' not in s else s for s in BLOCKED_ADDRESSES]
   value={'program':str(exe),'remote':addresses}
-  with patch('native_process.subprocess.run',return_value=subprocess.CompletedProcess([],0,stdout=json.dumps(value))) as run:
+  # Mock the Windows boundary locally; do not change os.name used by pathlib.
+  with patch('native_process.os') as native_os, patch('native_process.subprocess.run',return_value=subprocess.CompletedProcess([],0,stdout=json.dumps(value))) as run:
+   native_os.name='nt'
    self.assertTrue(guard.ready('godot'));self.assertIn('HNetCfg.FwPolicy2',run.call_args[0][0][-1])
   value['remote'].pop()
-  with patch('native_process.subprocess.run',return_value=subprocess.CompletedProcess([],0,stdout=json.dumps(value))):self.assertFalse(guard.ready('godot'))
+  with patch('native_process.os') as native_os, patch('native_process.subprocess.run',return_value=subprocess.CompletedProcess([],0,stdout=json.dumps(value))):
+   native_os.name='nt';self.assertFalse(guard.ready('godot'))
+  if os.name!='nt':self.assertFalse(guard.ready('godot'))
 
 if __name__=='__main__':unittest.main(verbosity=2)

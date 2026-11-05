@@ -7,8 +7,8 @@ function available(){return new Promise(resolve=>{
  request.on('error',()=>resolve(false));request.on('timeout',()=>{request.destroy();resolve(false);});
 });}
 class Gpu {
- constructor(runtime){this.runtime=runtime;this.pending=null;}
- async status(){return {online:this.runtime.platform==='win32'&&await available()};}
+ constructor(runtime){this.runtime=runtime;this.pending=null;this.mac=runtime.platform==='darwin'?new (require('./gpu-macos.cjs').MacGpu)(runtime):null;}
+ async status(){if(this.mac)return this.mac.status();return {online:this.runtime.platform==='win32'&&await available()};}
  async startComfy(){
   const root=this.runtime.gpuDir,config=path.join(root,'config.json'),launcher=path.join(root,'launcher.json');
   if(!fs.existsSync(config)||!fs.existsSync(launcher))return;
@@ -18,6 +18,7 @@ class Gpu {
   await this.runtime.spawnDetached(pythonw,[script,'--config',config]);
  }
  async open(){
+  if(this.mac)return this.mac.open();
   if(this.runtime.platform!=='win32')throw new ToolkitError('GPU services are unavailable on this platform.');
   if(this.pending)return this.pending;
   this.pending=this.ensure();try{return await this.pending;}finally{this.pending=null;}

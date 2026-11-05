@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-11-05 — PR #5 安全边界追加修复
+
+- 对已有网络安全修复复核：Tailscale 目标地址须唯一且位于 UP/RUNNING 的 utun，拒绝停用/重复接口；ComfyUI listener 检查与启停串行化，后台网络监测不被启动锁阻塞。
+- ComfyUI listener 异常先撤销远程访问再等待进程停止；停止发生在依赖探针期间时不再启动新子进程；清理异常仍继续停止受管 ComfyUI。
+- 本地管理请求在网络检查、慢请求体读取后重验安全状态和 Bearer；session 不绕过配置/Token 权限失败。产物流打开或读取期间发生撤销时不再发送成功头或新读出的数据。
+- 卸载在 launchctl 操作前后核对托管 plist/launcher 的完整内容和文件身份；文件被替换时保留文件并拒绝删除，继续保留用户数据。
+- 新增 12 项 Mock 边界测试；全部 Python Bridge 197 项（194 通过、3 Windows 专属跳过），Toolkit Node 78 项（77 通过、1 Windows 原生探针跳过）。未访问真实 VPS、启动真实 ComfyUI/GPU、修改 main 或引入 Godot 功能；原 PR #5 保持 Draft。
+
+## 2026-11-05 — PR #5 macOS Bridge 网络安全修复
+
+- 启动前和绑定后核验 Tailscale Self 与本机 utun 地址；运行期后台监测地址消失/变化、离线、配置变化和探测失败，锁定拒绝并关闭所有服务连接。无监听地址回退；网络恢复后须显式重启并重新校验。
+- 所有远程 API 每请求校验 Bearer、peer IP/节点身份/在线状态；Token 从私有文件实时读取，覆盖 keep-alive 与原子轮换，错误响应保持固定脱敏内容。
+- LaunchAgent 保持当前用户 GUI domain、参数数组及 KeepAlive=false；拒绝 root/euid 提权，start/stop/uninstall 校验完整 plist 和 launcher 元数据，保留用户文件。
+- 托管 ComfyUI 固定 127.0.0.1:8188，并在启动、后端调用前和后台用 mock 可替换的 lsof 探测实际监听/PID；异常停止受管子进程，服务退出后拒绝迟到的 Start。
+- 新增 21 项安全回归；全部 Python Bridge 185 项（182 通过、3 Windows 专属跳过），Toolkit Node 78 项（77 通过、1 Windows 原生探针跳过）。仅临时目录、Mock Tailscale/ifconfig/lsof/launchctl/Popen 和回环 Mock ComfyUI；未连接真实 VPS 或执行 GPU 工作流。
+
+## 2026-11-05 — macOS ComfyUI Bridge 阶段 4 开发记录
+
+- 复用 Bridge HTTP、工作流、任务/产物和原 VPS MCP；新增 macOS 平台 adapter、私有配置/token、独立安装管理 CLI 与用户级 LaunchAgent。安装/卸载先预览确认，保留用户软件、模型、工作流和任务数据。
+- Bridge 只绑定经验证的本机 Tailscale IPv4；每请求检查 Bearer、allowlist 节点身份和在线状态，离线/IP 变化拒绝，不退化到公网。管理页与托管 ComfyUI 仅监听回环。
+- 原生 arm64/Python 环境检查、MPS 检测及明确 CPU fallback；固定启动参数禁用 custom/API nodes，管理受管进程的启动、停止和超时。Mac 原生 GPU/脚本/通用 shell 均不开放，无 PF 或 Windows 隔离等价承诺。
+- Toolkit Mac GPU ready 要求安装、LaunchAgent、Tailscale、Token、peer 与实际 ComfyUI 健康全部通过；专用面板保留 Windows 行为，Accounts/Downloads 继续沿用阶段 2、3 实现。
+- GPU 专项 68 项通过；Toolkit Node 77 通过/1 Windows 原生跳过；Python Bridge 161 通过/3 Windows 专属跳过。全部使用合成任务、临时目录及 mock，不代表真实 MPS/Tailscale/LaunchAgent/GPU 验收。真实安装、插件更新、私密配置传输与 GPU 任务待审查和人工批准。
+
 ## 2026-11-05 — macOS Downloads 阶段 3 开发记录
 
 - 解除 Downloads preview，复用平台 runtime 和下载引擎；初始化仅表示本地配置可用，远程成功/失败按实际请求更新，任务页面显示持久化状态。Accounts 保持阶段 2，GPU 保持 unsupported。

@@ -3,8 +3,7 @@ import argparse, base64, copy, hashlib, hmac, http.server, io, json, logging
 import logging.handlers, mimetypes, os, pathlib, re, threading, time, urllib.error
 import urllib.parse, urllib.request, uuid, shutil
 from workflow_library import WorkflowLibrary
-from native_control import NativeControl
-from native_tripo import TripoControl
+from bridge_platform import WindowsPlatform
 from remote_privacy import remote_json
 from job_reuse import latest_attempt, attempt_fields
 
@@ -86,14 +85,18 @@ def apply_parameters(workflow, values):
         prompt[str(spec['node'])]['inputs'][spec['input']] = value
     return prompt
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError('ComfyUI redirects are not allowed.')
+
 class ComfyAdapter:
     kind = 'comfyui.workflow'
     def __init__(self, base):
         parsed = urllib.parse.urlsplit(base)
-        if parsed.scheme != 'http' or parsed.hostname not in ('127.0.0.1', 'localhost') or parsed.path not in ('', '/'):
+        if parsed.scheme != 'http' or parsed.hostname not in ('127.0.0.1', 'localhost') or parsed.path not in ('', '/') or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError('ComfyUI URL must be a local loopback HTTP address.')
         self.base = base.rstrip('/')
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     def request(self, route, body=None, timeout=15):
         data = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(self.base + route, data=data, headers={'Content-Type': 'application/json'})
@@ -107,6 +110,8 @@ class ComfyAdapter:
             raise ValueError('ComfyUI is unavailable. Start ComfyUI on this computer and retry.') from None
     def status(self):
         queue = self.request('/queue')
+        if not isinstance(queue, dict) or not all(isinstance(queue.get(k), list) for k in ('queue_running', 'queue_pending')):
+            raise ValueError('Invalid ComfyUI health response.')
         return {'online': True,
                 'running': len(queue.get('queue_running', [])), 'pending': len(queue.get('queue_pending', []))}
     def submit(self, prompt, client_id):
@@ -169,7 +174,8 @@ class ComfyAdapter:
         return {'name': value['name'], 'subfolder': value.get('subfolder', ''), 'reference': '/'.join(filter(None, [value.get('subfolder'), value['name']]))}
 
 class Bridge:
-    def __init__(self, config, adapter=None):
+    def __init__(self, config, adapter=None, platform_adapter=None):
+        self.platform = platform_adapter or WindowsPlatform()
         self.config = config; self.root = pathlib.Path(config['data_dir'])
         self.root.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
@@ -178,9 +184,7 @@ class Bridge:
         def save_config():
             if config.get('_config_file'):
                 atomic_json(pathlib.Path(config['_config_file']),{k:v for k,v in config.items() if not k.startswith('_')})
-        self.native = NativeControl(config,save_config)
-        self.tripo = TripoControl(config)
-        if config.get('tripo'): self.tripo.start_keepalive()
+        self.native, self.tripo = self.platform.native_controls(config, save_config)
         self.jobs = {}
         for file in (self.root/'jobs').glob('*.json'):
             try:
@@ -266,7 +270,7 @@ class Bridge:
             elif job['status'] == 'running': raise ValueError('Running jobs cannot be interrupted through this bridge.')
             return self.inspect(ident)
 
-def make_handler(bridge):
+def make_handler(bridge, security=None):
     class Handler(http.server.BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
         server_version = 'LocalBridge'
@@ -275,6 +279,9 @@ def make_handler(bridge):
             super().setup(); self.connection.settimeout(90)
         def log_message(self, fmt, *args): pass  # No tokens, prompts or filenames in request logs.
         def send_json(self, status, value):
+            if security and security.revoked.is_set() and status != 403:
+                self.close_connection = True
+                return
             if getattr(self, 'reply_started', False): self.close_connection = True; return
             self.reply_started = True
             value = remote_json(value, resources=urllib.parse.urlsplit(self.path).path.startswith('/v1/tripo/'))
@@ -283,15 +290,21 @@ def make_handler(bridge):
             self.send_header('Content-Length', str(len(data))); self.send_header('Cache-Control', 'no-store')
             self.send_header('X-Content-Type-Options', 'nosniff'); self.end_headers(); self.wfile.write(data)
         def authorized(self):
+            if security:
+                return (not self.headers.get('Origin') and
+                        security.authorize(self.headers.get('Authorization', ''), self.client_address[0]))
             expected = 'Bearer ' + bridge.config['token']
-            return (self.client_address[0] in bridge.config['allowed_peers'] and not self.headers.get('Origin') and
-                    hmac.compare_digest(self.headers.get('Authorization', '').encode(), expected.encode()))
+            return (not self.headers.get('Origin') and
+                    hmac.compare_digest(self.headers.get('Authorization', '').encode(), expected.encode()) and
+                    bridge.platform.authorize_peer(bridge.config, self.client_address[0]))
         def body(self):
             if self.headers.get('Transfer-Encoding'): raise ValueError('Chunked uploads are not supported.')
             size = int(self.headers.get('Content-Length', '0'))
             if size < 0 or size > MAX_BODY: raise ValueError('Request is too large.')
             if self.headers.get('Content-Type', '').split(';')[0] != 'application/json': raise ValueError('Expected JSON.')
             value = json.loads(self.rfile.read(size))
+            if security and not self.authorized():
+                raise ValueError('Access denied.')
             if not isinstance(value, dict): raise ValueError('Expected a JSON object.')
             return value
         def handle_request(self):
@@ -299,6 +312,8 @@ def make_handler(bridge):
             if not self.authorized():
                 self.close_connection = True; return self.send_json(403, {'error': 'Access denied.'})
             route = urllib.parse.urlsplit(self.path).path
+            if bridge.platform.comfy_only and route.startswith(('/v1/native', '/v1/unity', '/v1/vroid', '/v1/tripo')):
+                return self.send_json(404, {'error': 'Unsupported on macOS; only ComfyUI is enabled.'})
             try:
                 if self.command == 'GET' and route == '/v1/status':
                     try: backend = bridge.adapters['comfyui.workflow'].status()
@@ -366,12 +381,22 @@ def make_handler(bridge):
                     with bridge.adapters[job['kind']].artifact(job['artifacts'][index]) as source:
                         size = int(source.headers.get('Content-Length', '-1'))
                         if size < 0 or size > bridge.config.get('max_artifact_bytes', 2*1024**3): raise ValueError('Artifact has an invalid or excessive size.')
+                        if security and security.revoked.is_set():
+                            self.close_connection = True
+                            return
                         self.reply_started = True
                         self.send_response(200); self.send_header('Content-Type', 'application/octet-stream'); self.send_header('Content-Length', str(size))
                         self.send_header('Cache-Control', 'no-store'); self.send_header('X-Content-Type-Options', 'nosniff'); self.end_headers()
                         left = size
                         while left:
+                            if security and security.revoked.is_set():
+                                self.close_connection = True
+                                return
                             chunk = source.read(min(left, 1024*1024))
+                            # A slow backend read may complete after revocation.
+                            if security and security.revoked.is_set():
+                                self.close_connection = True
+                                return
                             if not chunk: raise ValueError('Artifact download was interrupted.')
                             self.wfile.write(chunk); left -= len(chunk)
                     return
@@ -385,10 +410,10 @@ def make_handler(bridge):
                 return self.send_json(404, {'error': 'Unknown route.'})
             except (ValueError, KeyError, TypeError, urllib.error.URLError) as error:
                 self.close_connection = True
-                return self.send_json(400, {'error': str(error)[:2000]})
+                return self.send_json(400, {'error': 'ComfyUI request rejected. Check workflow parameters, job state and local service status.' if bridge.platform.comfy_only else str(error)[:2000]})
             except (BrokenPipeError, ConnectionResetError, TimeoutError): self.close_connection = True
             except Exception:
-                logging.exception('Bridge request failed')
+                logging.error('Bridge request failed') if bridge.platform.comfy_only else logging.exception('Bridge request failed')
                 self.close_connection = True; self.send_json(500, {'error': 'Local bridge error. Check the local bridge log.'})
         do_GET = handle_request
         do_POST = handle_request
@@ -400,6 +425,10 @@ class Server(http.server.ThreadingHTTPServer):
     def handle_error(self, request, client_address): logging.error('Client connection ended unexpectedly')
 
 def main():
+    import sys
+    if sys.platform == 'darwin':
+        from macos_service import main as macos_main
+        return macos_main()
     parser = argparse.ArgumentParser(); parser.add_argument('--config', required=True); args = parser.parse_args()
     config = json.loads(pathlib.Path(args.config).read_text(encoding='utf-8'))
     config['_config_file']=str(pathlib.Path(args.config).resolve())

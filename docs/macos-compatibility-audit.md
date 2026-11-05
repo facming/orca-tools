@@ -244,3 +244,127 @@ git diff --check
 5. 验证完成/取消/Clear access 后仅移除本任务远程 authorized_keys 条目与元数据；中断清理时保留提示，恢复连接后可重试。真实 host-key 变更只在专用测试服务器安排，必须失败关闭。
 
 **剩余限制。** 真实 SDK/CLI/SSH 回包、项目根与符号链接语义、真实 TCC、长时间大文件与真实网络中断均待授权验收。阶段 1 已确认的 worker 空闲回收仍可能中断传输，需重开管理页并 Resume；不伪造保活。准备阶段若在创建 partial 后、元数据落盘前的极短窗口退出，保留文件并失败关闭，可能需 Clear access 后新建任务。非硬链接文件系统复制回退在发布中断时可能需要人工检查，绝不自动覆盖。PID 复用或不完整锁按占用/异常处理，需要人工确认后修复；不强行移除活进程锁。Intel Mac、Windows 原生和断电耐久性未验收。
+
+## 12. 阶段 4 ComfyUI Bridge（2026-11-05）
+
+基线 `feature/macos-downloads` = `872b7508ad4d7eab0c4e4d6e73c9e7910516d454`，fetch 后本地/远端相同，开始时工作区干净。从此创建 `feature/macos-gpu-comfyui`，Draft PR base 为阶段 3 分支，不修改 main、不合并 PR。
+
+实现和文件复用清单见 [实施文档第 8 节](macos-port-implementation.md#8-阶段-4macos-comfyui-bridge-实现2026-11-05)。本阶段仅 ComfyUI，远程 MCP 文件和请求格式未改。Mac 不实例化 native/Tripo 控制，也不复制这些控制脚本到 Mac 安装。Windows installer 额外复制平台包，其余 Windows 安装行为保留。
+
+| 要求 | 离线证据 |
+| --- | --- |
+| arm64 / Python 检测、解释器发现 | Darwin/arm64/版本门槛、Intel/Rosetta 拒绝、venv 路径保留、缺失解释器拒绝；不运行用户 Python。 |
+| 根目录与必要依赖 | 合成 main.py/cli_args.py/目录，缺失及不支持禁用 custom/API nodes 的版本拒绝，依赖 probe 成功/失败为 mock。 |
+| MPS / CPU fallback | 模拟 torch MPS 可用/不可用；验证明确 backend 和 --cpu 参数，未导入真实 torch。 |
+| Token / 配置权限 | 随机 token、0600 文件、0700 目录，错误权限/符号链接/重复写入拒绝，Token 不在 config.json 或 plist 参数中。 |
+| LaunchAgent | 临时目录生成 plist，plistlib 解析和系统 plutil -lint 通过；bootstrap/print/bootout/kickstart 均为 mock，没有注册真实服务。 |
+| 生命周期 | mock Popen/killpg、固定回环参数、MPS/CPU 分支、启动超时、外部占用不接管、停止只针对持有的子进程。 |
+| Tailscale 地址 / 身份 | Mock status JSON 验证本机地址、稳定节点 ID、批准 peer；非本机地址、0.0.0.0、公网、IPv6、LAN 全拒绝。 |
+| 认证 / allowlist | HTTP 错误 token 拒绝、peer 拒绝、节点 ID 漂移、离线/超时拒绝；真实 socket 仅回环，用测试 adapter 将连接身份映射到合成 peer。 |
+| ComfyUI / 参数 | 本地 mock HTTP 实现 queue/prompt/history/view，类型、范围、未知参数、错误 graph 和 URL/redirect 拒绝。 |
+| 任务 / 下载 / 重启 | 原 MCP Client 调用 workflow/submit/query/cancel/fetch，合成产物字节校验，重启加载任务、幂等重试及未知提交不自动重投；运行中 cancel 明确拒绝。 |
+| 离线 / 脱敏 | Bridge/ComfyUI/Tailscale 故障、受管进程丢失、HTTP 错误与日志异常不泄漏合成 secret；管理页 token 与远程 Bearer 分离。 |
+| Toolkit | 六项 ready 条件逐项置假、launcher 存在但 token/config 异常、HTTP 错误脱敏；Mac native/import 写路由拒绝，Accounts 被动读取和 Downloads 阶段 3 回归保留。 |
+| 安装 / 卸载 | Preview 不写文件、不跑 probe；安装/卸载在临时 HOME + mock 系统命令执行；卸载保留 ComfyUI、workflow、token 和任务数据。 |
+
+测试结果：
+
+- GPU ComfyUI Python 专项：68 项通过，0 失败（包括新增 Mac 测试 23 项）。
+- 全部 Toolkit Node：78 项，77 通过、0 失败、1 项需要 Windows Orca/OpenSSH 的原生探针跳过；其中 Mac GPU 专项 6 项通过。
+- 全部 Python Bridge：164 项，161 通过、0 失败、3 跳过。跳过 Windows Job Objects 实机用例及两项 Windows Tripo 文件系统编码用例；不代表 Windows 实机或 Mac Tripo 验收。
+- `git diff --check` 通过。安装版模块在隔离 Python `-I` 下可导入；只执行 `--help`，不启动服务。
+
+执行命令（仓库根目录）：
+
+```sh
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_macos_bridge.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+node --test plugins/toolkit/test-macos-gpu.cjs
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+git diff --check
+```
+
+GPU 专项集合为 `test_macos_bridge`、`test_bridge`、`test_comfy_startup`、`test_comfy_history`、`test_workflow_library`、`test_job_reuse`、`test_instance_lock`，将 `services/local-gpu-bridge` 加入测试模块路径后通过 unittest 加载。
+
+**既有测试问题的独立核查。** 对阶段 3 原始 commit 做临时 archive 复跑，原有 141 项中出现 3 failures + 1 error，与本次首轮相同：Blender 合成路径未 canonicalize（Mac `/var` 别名）、Windows Firewall 夹具未模拟平台边界、两项 Tripo Windows 路径编码在 POSIX 上不成立。修正前两项测试夹具；对后两项添加 Windows-only 声明，Windows 上仍执行。没有修改 Blender/Tripo 生产实现，也没有把跳过写成通过。测试中原有 malformed workflow 的预期异常日志不表示套件失败。
+
+**没有真实 GPU 验收。** 本轮没有安装/启用新 Orca 插件、读取真实 Bridge 配置或 Token、查询真实 Tailscale 节点、注册 LaunchAgent、启动用户 ComfyUI、下载模型或提交真实生成任务。所有安装数据、token、IP 和任务均为临时合成夹具。真实 MPS、ComfyUI 版本/依赖、实际 Tailscale CLI 回包、实际登录服务与信号生命周期、真实 GPU 输出质量/性能均未验证。
+
+**审查后需要人工授权的步骤：**
+
+1. 选择可信 ComfyUI 与 Python 环境（本阶段禁用 custom/API nodes），确定已有输入/输出/workflow 目录。审核安装预览后才执行 `--confirm`。
+2. 确认本机 Tailscale 地址和批准 peer，验证实际 CLI/status schema；失败时停止，不放宽绑定或身份检查。客户端私密配置只经批准的安全通道传输，不放入命令行/日志/PR。
+3. 验证用户 LaunchAgent 启停和登录行为；在回环管理页显式启动 ComfyUI，检查 MPS 或 CPU fallback、六项 ready 条件、队列取消及小型可信工作流产物。
+4. 用专用环境验证错误 token、非批准 peer、Tailscale 离线和本机 IP 变化；确认 Bridge 拒绝请求、ComfyUI 仅监听回环。无需 PF 或常驻管理员权限。
+5. 审批 Orca 插件更新后验证实际面板。测试卸载预览和服务注销，核对模型、工作流与全部保留数据不变。
+
+**限制。** custom/API nodes、Intel/Rosetta、其他 GPU 应用不支持；不承诺进程组等同于 Job Objects 或出站沙箱。强制杀死 Bridge/断电可能遗留 ComfyUI，重启拒绝接管端口，需人工核对并停止原实例。未知提交不自动重投；运行中任务只能本机停止整个托管 ComfyUI。没有自动升级/覆盖/删除保留数据的功能。真实 MPS、网络、LaunchAgent 和 Windows native 均待实机验收；原有 Toolkit worker 空闲回收限制继续存在。
+
+
+## 13. PR #5 针对性安全修复（2026-11-05）
+
+本次仅修复 `feature/macos-gpu-comfyui` 的网络、鉴权和服务生命周期边界，未增加 GPU/远程功能。以下结果替代第 12 节的运行期恢复语义及测试计数。
+
+| 安全边界 | 修复和离线证据 |
+| --- | --- |
+| 本机 Tailscale 绑定 | 启动前及绑定后检查 Self/节点 ID，并核对 ifconfig 的 utun IPv4；Self 有地址但接口缺失、地址落在 en0、地址漂移全部拒绝，测试断言没有地址回退。 |
+| 运行期监测 | 每轮间隔 1 秒执行检查；Tailscale/ifconfig/lsof 各有 4 秒超时。请求同时实时检查，不仅依赖后台结果。故障检测后锁定拒绝并退出；恢复不自动解锁。 |
+| 每请求鉴权 | 对 status、任务列表/状态/提交/取消、工作流、产物、上传及未知/禁用路由逐一测试：同一个 keep-alive socket 先成功请求，再错误 Token 或切换未授权 peer，全部返回固定 403，未调用后端。忽略伪造 X-Forwarded-For。 |
+| Token 轮换 | 私有 Token 文件原子替换后，同一连接新 Token 成功、旧 Token 拒绝；本地管理 Bearer 同步失效。系统探测完成后再次读 Token；非法权限/文件内容失败关闭。 |
+| 服务停止/重启 | 实际临时回环服务器使用生产 serve/关闭逻辑；地址消失、变化、Tailscale 断线、接口消失、探测超时、ComfyUI 监听异常后，Bridge 和管理端口拒绝新连接，已接受 socket 收到 EOF。退出/SIGTERM 的共同清理路径、管理端口启动失败亦关闭资源。恢复前重启不绑定端口，恢复后新实例重新验证。 |
+| LaunchAgent | plistlib 参数数组正确保留空格、XML 特殊字符和引号；系统 plutil lint 通过。无 UserName/root LaunchDaemon；拒绝 root/euid 提权。KeepAlive=false，mock 异常退出只允许显式 kickstart，服务重新检查安全条件。 |
+| 停止/卸载 | 校验完整 plist 与 launcher 元数据及权限；截短参数、替换程序、修改 KeepAlive/UserName 均拒绝 stop/uninstall，不删除文件；正常卸载保留用户标记文件、配置/Token、ComfyUI 和工作流。 |
+| ComfyUI | 固定 127.0.0.1:8188 和既有禁用参数；lsof Mock 验证受管 PID 与实际监听地址，拒绝 wildcard/公网/Tailscale/IPv6/其他 PID/探测异常；健康/后端访问之前检查，每次后端调用重做。只终止当前持有的子进程；服务最终停止后迟到的 Start 被拒绝。 |
+
+验证命令及结果：
+
+```sh
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_macos*.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+git diff --check
+python3 scripts/check.py
+```
+
+- macOS 专项 44 项通过，其中 `test_macos_security.py` 新增 21 项。
+- 全部 Python Bridge 185 项：182 通过、0 失败、3 Windows 专属跳过。
+- 全部 Toolkit Node 78 项：77 通过、0 失败、1 Windows 原生探针跳过。
+- diff whitespace、源码/语法/私密文件扫描通过。预期 malformed workflow 夹具的日志异常不表示测试失败。
+
+**剩余风险/未验证项。** 所有 Tailscale、ifconfig、lsof、launchctl、Popen/killpg 都是 Mock；未查询真实网络状态、注册 LaunchAgent、读取真实配置/Token、访问 VPS、下载模型或执行真实 GPU。实际 macOS Tailscale utun 命名/status 格式、lsof 输出及权限、真实登录/信号和 MPS 仍需后续实机验收。探测是有超时的周期检查，不是 OS 网络沙箱，故障出现到检测存在间隔；检测后立即锁定，关闭已接受连接可能中断下载。ComfyUI 必须仍是可信本地安装，Bridge 不绕过其认证或自动接管外部实例。SIGKILL/断电可能遗留 ComfyUI；禁止自动重启和外部进程接管，需人工处理。Token 文件应以 0600 原子替换并同步客户端；其他配置修改须显式重启。原有 Windows 专属跳过仍不代表 Windows 实机验收。
+
+## 14. PR #5 安全边界复核与追加修复（2026-11-05）
+
+本次开始时工作区干净，实际当前分支为 `feature/macos-godot`。fetch 后安全切回用户指定的 `feature/macos-gpu-comfyui`，本地/远端均为 `b2fdd22204af25e0cecf8e73f87a7fc684267b83`；PR #5 仍为 Draft，base 为 `feature/macos-downloads`。该基线已含第 13 节安全修复，本次只补充边界问题，没有带入 Godot 分支代码、创建新 PR、修改 main 或合并。
+
+| 审查项 | 本轮修复 / 证据 |
+| --- | --- |
+| 本机监听地址 | 除 Tailscale Self/node ID 外，要求目标地址只出现一次，且位于具有 UP/RUNNING 标志的 utun；停用/未运行接口、目标地址同时出现在 en0 或另一 utun、未解析接口头全部失败关闭。没有地址回退。 |
+| 网络监测与进程并发 | ComfyUI listener 检查与启停共享生命周期锁，避免检查旧进程却操作新进程。后台 monitor 在 Start 占锁时跳过该次 listener 检查，继续 Tailscale 监测；Start 自身检查 listener。此跳过仅供 monitor，不能用于 HTTP/ready 授权。 |
+| 错误 ComfyUI listener | 在等待受管子进程 TERM/KILL **之前**设置全局 revoked；即使停止较慢，远程请求也立即拒绝。测试在 Mock child.wait 内验证已经撤销访问。 |
+| 停止与迟到启动 | 若 stop/final stop 发生在 dependency probe 期间，probe 返回后拒绝 Popen；不在服务停止后短暂创建子进程。测试使用事件同步和 Mock Popen，不启动 ComfyUI。 |
+| 每请求认证 | 保留全部远程 API 的逐请求 Bearer/peer 检查和 Token 轮换。补充本地管理请求检查当前安全状态；浏览器 session 不绕过配置/Token 权限/网络失败。慢 POST body 读取后再次验证安全状态与 Bearer，GET 在网络探针后重新验证 Bearer，避免期间轮换的旧凭据继续读取或启动。 |
+| 产物流撤销 | 打开后端流后、发送成功头之前，以及每次阻塞 read 返回之后，重新检查 revoked；已撤销时丢弃刚读取的数据并关闭连接。固定错误信息不输出凭据。 |
+| 清理失败 | 各层 finally 保证即使 remote/admin socket 清理抛错，也继续尝试后续服务和受管 ComfyUI 清理。 |
+| LaunchAgent / 卸载 | 原有 plist 参数数组、普通用户 GUI domain、0700/0600、KeepAlive=false、完整 plist/launcher 校验保持。卸载在耗时 launchctl 操作前记录两个待删除文件的身份，操作后重新校验内容、权限、inode/时间/大小；即使替换成同样字节也拒绝删除，保留两个文件和用户数据。没有 root LaunchDaemon、自动覆盖或权限提升。 |
+
+**新增测试：** `test_macos_security_edges.py` 共 12 项，覆盖停用/重复接口、撤销先于子进程等待、monitor 不受 Start 锁阻塞、probe 中停止阻止 Popen、慢请求期间断网/Token 轮换/权限变化、GET 探针期间轮换、产物流打开/读取期间撤销、清理抛错和 bootout 期间文件替换。此前 21 项安全测试完整保留，包括运行中地址消失/变化、Tailscale 断线、未授权 peer、错误 Token、keep-alive 逐请求认证、LaunchAgent 异常退出、Bridge 重启、错误 ComfyUI 地址，以及停止后真实回环端口拒绝连接/已接受 socket EOF。
+
+**原基线复现：** 在临时 archive 中使用相同新增测试对 `b2fdd22` 做定向验证。两个产物流测试分别观察到撤销后仍发送 200 头、仍发送后端数据；卸载测试观察到 bootout 期间替换的同内容 plist 仍被删除。三项均未通过；卸载的后一子用例还因前一失败已删除文件而报错。新实现下这些用例及全部回归通过，没有用真实服务或扩大权限来验证。
+
+执行命令及结果：
+
+```sh
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_macos_security_edges.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+git diff --check
+python3 scripts/check.py
+```
+
+- 新增边界测试：12 通过，0 失败。
+- 全部 Python Bridge：197 项，194 通过，0 失败，3 Windows 专属跳过；包括已有 macOS 44 项和本轮新增 12 项。
+- 全部 Toolkit Node：78 项，77 通过，0 失败，1 Windows 原生探针跳过。Toolkit 生产文件未改。
+- diff whitespace、源码/语法/私密文件扫描通过。已有 malformed workflow 夹具的预期异常日志不表示失败。
+
+**剩余风险和未验证项：** 本轮仍只用临时目录、Mock Tailscale/ifconfig/lsof/launchctl/Popen/killpg 及合成回环 HTTP，未读取真实配置/Token、连接 VPS、注册 LaunchAgent、启动真实 ComfyUI 或执行 GPU 工作流。实际 utun/flag/lsof 输出、信号时序、MPS、TCC 和 Windows 实机仍待人工授权验收。监测是有超时的轮询，不是网络沙箱；撤销与 socket 写入之间仍不是内核原子隔离，已经发出的数据无法撤回。卸载复验覆盖耗时系统操作窗口，不保证抵御同一登录用户在最终检查与 unlink 之间恶意并发替换；不对不可信本地用户代码作沙箱承诺。SIGKILL/断电可能遗留 ComfyUI，服务保持禁止自动接管和自动重启，需人工检查。对实际安装的代码更新仍须独立审查和人工批准，本任务只更新源码和原 Draft PR。
