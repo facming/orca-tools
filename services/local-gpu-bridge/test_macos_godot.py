@@ -448,3 +448,58 @@ class GodotTests(unittest.TestCase):
             with self.assertRaises(ValueError): macos_service.serve({'comfy_url':'http://127.0.0.1:8188','listen':'127.0.0.1','port':0}, adapter)
             native.close.assert_called_once()
             comfy.return_value.stop.assert_called_once_with(final=True)
+
+    def test_rebased_cleanup_errors_still_close_both_engines(self):
+        import macos_service
+        for stage in ('remote', 'admin_shutdown', 'admin_close', 'monitor', 'godot'):
+            with self.subTest(stage=stage):
+                native, remote, admin, monitor = Mock(), Mock(), Mock(), Mock()
+                failures = {'remote': remote.server_close, 'admin_shutdown': admin.shutdown,
+                            'admin_close': admin.server_close, 'monitor': monitor.join, 'godot': native.close}
+                failures[stage].side_effect = OSError('synthetic cleanup failure')
+                bridge = Mock(native=native)
+                with patch.object(macos_service, 'RuntimeSecurity') as security, patch.object(macos_service, 'ComfyProcess') as comfy, patch.object(macos_service, 'Bridge', return_value=bridge), patch.object(macos_service, 'ClosingServer', return_value=remote), patch.object(macos_service, 'start_admin', return_value=admin), patch.object(macos_service.threading, 'Thread', return_value=monitor):
+                    security.return_value.check.return_value = True
+                    with self.assertRaises(OSError):
+                        macos_service.serve({'comfy_url':'http://127.0.0.1:8188','listen':'127.0.0.1','port':0}, Mock())
+                    security.return_value.revoked.set.assert_called_once()
+                    remote.server_close.assert_called_once()
+                    admin.shutdown.assert_called_once()
+                    admin.server_close.assert_called_once()
+                    monitor.join.assert_called_once()
+                    native.close.assert_called_once()
+                    comfy.return_value.stop.assert_called_once_with(final=True)
+
+    def test_native_artifacts_honor_revocation_during_open_and_read(self):
+        import io
+        import socket
+        config = {**self.config, 'token': 'c'*64, 'allowed_peers': ['127.0.0.1'], 'workflow_dirs': []}
+        adapter = MacOSPlatform(self.root)
+        with patch.object(adapter, 'native_controls', return_value=(self.control, None)):
+            bridge = Bridge(config, platform_adapter=adapter)
+        security = Mock()
+        security.revoked = threading.Event()
+        security.authorize.side_effect = lambda *_: not security.revoked.is_set()
+        server = Server(('127.0.0.1', 0), make_handler(bridge, security))
+        thread = threading.Thread(target=server.serve_forever, daemon=True);thread.start()
+        self.addCleanup(server.server_close);self.addCleanup(server.shutdown)
+        for stage in ('open', 'read'):
+            with self.subTest(stage=stage):
+                security.revoked.clear()
+                class Artifact(io.BytesIO):
+                    def __enter__(stream):
+                        if stage == 'open': security.revoked.set()
+                        return stream
+                    def read(stream, *args):
+                        if stage == 'read': security.revoked.set()
+                        return super().read(*args)
+                with patch.object(self.control, 'open_artifact', return_value=Artifact(b'synthetic-private-png')):
+                    connection = socket.create_connection(('127.0.0.1', server.server_port), timeout=2)
+                    try:
+                        connection.sendall(('GET /v1/native/artifacts/'+'a'*32+'/0 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n').encode())
+                        data = b''
+                        while chunk := connection.recv(4096): data += chunk
+                    finally:
+                        connection.close()
+                self.assertNotIn(b'200 OK', data)
+                self.assertNotIn(b'synthetic-private-png', data)

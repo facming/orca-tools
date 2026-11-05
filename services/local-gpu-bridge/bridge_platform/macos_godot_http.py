@@ -3,7 +3,7 @@ import re
 from .macos_godot import Unsupported
 
 
-def handle_native(handler, bridge, route):
+def handle_native(handler, bridge, route, security=None):
     native = bridge.native
     try:
         if native is None:
@@ -35,6 +35,9 @@ def handle_native(handler, bridge, route):
                 data = stream.read()
             if len(data) > bridge.config.get('max_artifact_bytes', 32 * 1024 * 1024):
                 raise ValueError('Artifact exceeds transfer limit.')
+            if security and security.revoked.is_set():
+                handler.close_connection = True
+                return
             handler.reply_started = True
             handler.send_response(200)
             handler.send_header('Content-Type', 'application/octet-stream')
@@ -42,7 +45,11 @@ def handle_native(handler, bridge, route):
             handler.send_header('Cache-Control', 'no-store')
             handler.send_header('X-Content-Type-Options', 'nosniff')
             handler.end_headers()
-            handler.wfile.write(data)
+            for offset in range(0, len(data), 1024 * 1024):
+                if security and security.revoked.is_set():
+                    handler.close_connection = True
+                    return
+                handler.wfile.write(data[offset:offset + 1024 * 1024])
             return
         raise Unsupported('unsupported: this native operation is not exposed on macOS.')
     except Unsupported as error:

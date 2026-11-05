@@ -314,7 +314,7 @@ def make_handler(bridge, security=None):
             route = urllib.parse.urlsplit(self.path).path
             if bridge.platform.restricted_native and route.startswith(('/v1/native', '/v1/unity', '/v1/vroid', '/v1/tripo')):
                 from bridge_platform.macos_godot_http import handle_native
-                return handle_native(self, bridge, route)
+                return handle_native(self, bridge, route, security)
             try:
                 if self.command == 'GET' and route == '/v1/status':
                     try: backend = bridge.adapters['comfyui.workflow'].status()
