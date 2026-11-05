@@ -244,3 +244,58 @@ git diff --check
 5. 验证完成/取消/Clear access 后仅移除本任务远程 authorized_keys 条目与元数据；中断清理时保留提示，恢复连接后可重试。真实 host-key 变更只在专用测试服务器安排，必须失败关闭。
 
 **剩余限制。** 真实 SDK/CLI/SSH 回包、项目根与符号链接语义、真实 TCC、长时间大文件与真实网络中断均待授权验收。阶段 1 已确认的 worker 空闲回收仍可能中断传输，需重开管理页并 Resume；不伪造保活。准备阶段若在创建 partial 后、元数据落盘前的极短窗口退出，保留文件并失败关闭，可能需 Clear access 后新建任务。非硬链接文件系统复制回退在发布中断时可能需要人工检查，绝不自动覆盖。PID 复用或不完整锁按占用/异常处理，需要人工确认后修复；不强行移除活进程锁。Intel Mac、Windows 原生和断电耐久性未验收。
+
+## 12. 阶段 4 ComfyUI Bridge（2026-11-05）
+
+基线 `feature/macos-downloads` = `872b7508ad4d7eab0c4e4d6e73c9e7910516d454`，fetch 后本地/远端相同，开始时工作区干净。从此创建 `feature/macos-gpu-comfyui`，Draft PR base 为阶段 3 分支，不修改 main、不合并 PR。
+
+实现和文件复用清单见 [实施文档第 8 节](macos-port-implementation.md#8-阶段-4macos-comfyui-bridge-实现2026-11-05)。本阶段仅 ComfyUI，远程 MCP 文件和请求格式未改。Mac 不实例化 native/Tripo 控制，也不复制这些控制脚本到 Mac 安装。Windows installer 额外复制平台包，其余 Windows 安装行为保留。
+
+| 要求 | 离线证据 |
+| --- | --- |
+| arm64 / Python 检测、解释器发现 | Darwin/arm64/版本门槛、Intel/Rosetta 拒绝、venv 路径保留、缺失解释器拒绝；不运行用户 Python。 |
+| 根目录与必要依赖 | 合成 main.py/cli_args.py/目录，缺失及不支持禁用 custom/API nodes 的版本拒绝，依赖 probe 成功/失败为 mock。 |
+| MPS / CPU fallback | 模拟 torch MPS 可用/不可用；验证明确 backend 和 --cpu 参数，未导入真实 torch。 |
+| Token / 配置权限 | 随机 token、0600 文件、0700 目录，错误权限/符号链接/重复写入拒绝，Token 不在 config.json 或 plist 参数中。 |
+| LaunchAgent | 临时目录生成 plist，plistlib 解析和系统 plutil -lint 通过；bootstrap/print/bootout/kickstart 均为 mock，没有注册真实服务。 |
+| 生命周期 | mock Popen/killpg、固定回环参数、MPS/CPU 分支、启动超时、外部占用不接管、停止只针对持有的子进程。 |
+| Tailscale 地址 / 身份 | Mock status JSON 验证本机地址、稳定节点 ID、批准 peer；非本机地址、0.0.0.0、公网、IPv6、LAN 全拒绝。 |
+| 认证 / allowlist | HTTP 错误 token 拒绝、peer 拒绝、节点 ID 漂移、离线/超时拒绝；真实 socket 仅回环，用测试 adapter 将连接身份映射到合成 peer。 |
+| ComfyUI / 参数 | 本地 mock HTTP 实现 queue/prompt/history/view，类型、范围、未知参数、错误 graph 和 URL/redirect 拒绝。 |
+| 任务 / 下载 / 重启 | 原 MCP Client 调用 workflow/submit/query/cancel/fetch，合成产物字节校验，重启加载任务、幂等重试及未知提交不自动重投；运行中 cancel 明确拒绝。 |
+| 离线 / 脱敏 | Bridge/ComfyUI/Tailscale 故障、受管进程丢失、HTTP 错误与日志异常不泄漏合成 secret；管理页 token 与远程 Bearer 分离。 |
+| Toolkit | 六项 ready 条件逐项置假、launcher 存在但 token/config 异常、HTTP 错误脱敏；Mac native/import 写路由拒绝，Accounts 被动读取和 Downloads 阶段 3 回归保留。 |
+| 安装 / 卸载 | Preview 不写文件、不跑 probe；安装/卸载在临时 HOME + mock 系统命令执行；卸载保留 ComfyUI、workflow、token 和任务数据。 |
+
+测试结果：
+
+- GPU ComfyUI Python 专项：68 项通过，0 失败（包括新增 Mac 测试 23 项）。
+- 全部 Toolkit Node：78 项，77 通过、0 失败、1 项需要 Windows Orca/OpenSSH 的原生探针跳过；其中 Mac GPU 专项 6 项通过。
+- 全部 Python Bridge：164 项，161 通过、0 失败、3 跳过。跳过 Windows Job Objects 实机用例及两项 Windows Tripo 文件系统编码用例；不代表 Windows 实机或 Mac Tripo 验收。
+- `git diff --check` 通过。安装版模块在隔离 Python `-I` 下可导入；只执行 `--help`，不启动服务。
+
+执行命令（仓库根目录）：
+
+```sh
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_macos_bridge.py'
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+node --test plugins/toolkit/test-macos-gpu.cjs
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+git diff --check
+```
+
+GPU 专项集合为 `test_macos_bridge`、`test_bridge`、`test_comfy_startup`、`test_comfy_history`、`test_workflow_library`、`test_job_reuse`、`test_instance_lock`，将 `services/local-gpu-bridge` 加入测试模块路径后通过 unittest 加载。
+
+**既有测试问题的独立核查。** 对阶段 3 原始 commit 做临时 archive 复跑，原有 141 项中出现 3 failures + 1 error，与本次首轮相同：Blender 合成路径未 canonicalize（Mac `/var` 别名）、Windows Firewall 夹具未模拟平台边界、两项 Tripo Windows 路径编码在 POSIX 上不成立。修正前两项测试夹具；对后两项添加 Windows-only 声明，Windows 上仍执行。没有修改 Blender/Tripo 生产实现，也没有把跳过写成通过。测试中原有 malformed workflow 的预期异常日志不表示套件失败。
+
+**没有真实 GPU 验收。** 本轮没有安装/启用新 Orca 插件、读取真实 Bridge 配置或 Token、查询真实 Tailscale 节点、注册 LaunchAgent、启动用户 ComfyUI、下载模型或提交真实生成任务。所有安装数据、token、IP 和任务均为临时合成夹具。真实 MPS、ComfyUI 版本/依赖、实际 Tailscale CLI 回包、实际登录服务与信号生命周期、真实 GPU 输出质量/性能均未验证。
+
+**审查后需要人工授权的步骤：**
+
+1. 选择可信 ComfyUI 与 Python 环境（本阶段禁用 custom/API nodes），确定已有输入/输出/workflow 目录。审核安装预览后才执行 `--confirm`。
+2. 确认本机 Tailscale 地址和批准 peer，验证实际 CLI/status schema；失败时停止，不放宽绑定或身份检查。客户端私密配置只经批准的安全通道传输，不放入命令行/日志/PR。
+3. 验证用户 LaunchAgent 启停和登录行为；在回环管理页显式启动 ComfyUI，检查 MPS 或 CPU fallback、六项 ready 条件、队列取消及小型可信工作流产物。
+4. 用专用环境验证错误 token、非批准 peer、Tailscale 离线和本机 IP 变化；确认 Bridge 拒绝请求、ComfyUI 仅监听回环。无需 PF 或常驻管理员权限。
+5. 审批 Orca 插件更新后验证实际面板。测试卸载预览和服务注销，核对模型、工作流与全部保留数据不变。
+
+**限制。** custom/API nodes、Intel/Rosetta、其他 GPU 应用不支持；不承诺进程组等同于 Job Objects 或出站沙箱。强制杀死 Bridge/断电可能遗留 ComfyUI，重启拒绝接管端口，需人工核对并停止原实例。未知提交不自动重投；运行中任务只能本机停止整个托管 ComfyUI。没有自动升级/覆盖/删除保留数据的功能。真实 MPS、网络、LaunchAgent 和 Windows native 均待实机验收；原有 Toolkit worker 空闲回收限制继续存在。

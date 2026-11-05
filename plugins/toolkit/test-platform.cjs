@@ -208,7 +208,8 @@ test('macOS activation shares one runtime, serves local previews and cannot star
   const html = await (await fetch(url)).text();
   const headers = {'X-Toolkit-Token': html.match(/const token='([a-f0-9]+)'/)[1], Origin: new URL(url).origin, 'Content-Type': 'application/json'};
   const state = await (await fetch(url + 'api/status', {headers})).json();
-  assert.deepEqual(Object.values(state.modules).map(m => m.status), ['preview', 'needs-setup', 'unsupported']);
+  assert.deepEqual(Object.values(state.modules).map(m => m.status), ['preview', 'needs-setup', 'offline']);
+  openGpu.mock.restore();
   for (const [route, method] of [['downloads/jobs', 'POST'], ['gpu/open', 'POST'], ['gpu/native', 'GET']]) {
     const response = await fetch(url + 'api/' + route, {method, headers, body: method === 'POST' ? '{}' : undefined});
     assert.equal(response.status, 400);

@@ -34,7 +34,8 @@ def launch_spec(config):
 
 def healthy(url):
     try:
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        from bridge import NoRedirect
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
         with opener.open(url + '/queue', timeout=2) as response:
             value = json.load(response)
         return isinstance(value.get('queue_running'), list) and isinstance(value.get('queue_pending'), list)

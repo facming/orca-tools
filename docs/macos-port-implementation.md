@@ -118,3 +118,62 @@ Windows Job Objects 和 Defender Firewall 不能直接等同于 macOS 能力。P
 - 不因测试失败而伪造 ready/connected/complete 状态。
 - 不把 Windows Job Objects/Firewall 的能力直接映射成 Mac 安全保证。
 - 不自动执行不可信项目脚本，不自动覆盖用户文件或清理未跟踪产物。
+
+## 8. 阶段 4：macOS ComfyUI Bridge 实现（2026-11-05）
+
+### 复用与协议审计
+
+| 文件 | 本阶段职责 |
+| --- | --- |
+| `services/local-gpu-bridge/bridge.py` | 复用 HTTP 服务、Bearer 常量时间比较、任务提交/查询/取消、持久化和产物流；加入平台能力边界，Mac 在进入 native 路由前拒绝。 |
+| `workflow_library.py` / `job_reuse.py` / `remote_privacy.py` | 工作流 API/editor 转换、有限参数、幂等 request_id、重启恢复和远程回包脱敏继续共用。 |
+| `comfy_startup.py` | 共用固定启动参数和回环健康检查；拒绝 HTTP redirect。Windows 自动启动行为保留。 |
+| `bridge_platform/{base,windows,macos}.py` | 平台能力接口、原 Windows native 控制、Mac 路径/环境/MPS/进程/LaunchAgent/Tailscale 校验。包名避免遮蔽标准库 `platform`。 |
+| `macos_service.py` / `scripts/install-local-gpu-macos.py` | Mac 专用服务、仅回环管理接口和独立安装/管理入口。Windows 安装器只增加复制平台包。 |
+| `plugin/client.py` | VPS MCP 不改动；测试使用原 Client 和现有 stdio MCP，用合成服务代替 VPS。 |
+| Toolkit `modules/gpu.cjs` / `gpu-macos.cjs` | Windows 路径保留，Mac 增加权限检查、实际健康请求和专用面板。Accounts/Downloads 生产逻辑不变。 |
+
+Windows `config.json` 保留内联 token、data_dir、listen、allowed_peers、comfy_url/comfy_startup 和 native/tripo 配置；原 launcher 格式仍为 `{pythonw: <existing pythonw.exe>}`。Mac config 不存 token，独立 token 文件按 0600 管理，launcher 使用 `{platform: "darwin", python, label, manager_url}`，不伪造 pythonw。
+
+HTTP 协议保持：`GET /v1/status`、`GET /v1/workflows`、`GET/POST /v1/jobs`、`GET /v1/jobs/{id}`、`POST /v1/jobs/{id}/cancel`、`GET /v1/artifacts/{id}/{index}`、`POST /v1/assets`。提交仍为 `{workflow_id, parameters, request_id}`，request_id 为 32 位十六进制。任务只允许修改已暴露的 literal 参数，保留类型、范围、enum、asset 相对路径限制。
+
+ComfyUI 仍使用 `/queue`、`/prompt`、`/history/{prompt_id}`、`/view`、`/upload/image`、`/object_info`。取消只删除本 Bridge 的排队 prompt；运行中任务明确拒绝全局 interrupt，与 MCP `cancel_pending_job` 的既有契约一致。停止托管 ComfyUI 是本机显式管理动作，会终止它正在处理的任务。重启读取原 jobs，不自动重投提交结果不确定的任务；已完成产物继续通过原下载接口读取。
+
+### 安装与管理
+
+只支持原生 macOS arm64、Python >= 3.10。用户选择已经安装且信任的 ComfyUI 根目录、Python 环境和目录；默认发现根目录下 `.venv/bin/python3` 或 `venv/bin/python3`，保留 venv 可执行文件路径而不解引用到系统 Python。检测使用独立 `-I` Python probe，导入 torch 及必要基础依赖并读取 MPS built/available；失败明确拒绝安装/启动，不运行 pip、不下载模型、不改环境。
+
+```sh
+python3 scripts/install-local-gpu-macos.py install --settings /path/to/private-settings.json
+# 先审阅预览，再由用户明确执行：
+python3 scripts/install-local-gpu-macos.py install --settings /path/to/private-settings.json --confirm
+python3 scripts/install-local-gpu-macos.py status
+python3 scripts/install-local-gpu-macos.py stop
+python3 scripts/install-local-gpu-macos.py start
+python3 scripts/install-local-gpu-macos.py logs
+python3 scripts/install-local-gpu-macos.py uninstall
+python3 scripts/install-local-gpu-macos.py uninstall --confirm
+```
+
+不带 `--settings` 时交互选择 ComfyUI 根目录、Python 和 Tailscale 地址。settings 允许字段为 `comfy_root`、`comfy_python`、`input_directory`、`output_directory`、`workflow_dirs`、`listen`、`allowed_peers`、`tailscale`；未知字段拒绝。输入/输出默认使用 ComfyUI 的 `input` / `output`，workflow 默认 `user/default/workflows`，全部要求已有目录。Tailscale CLI 从 PATH 发现或由用户指定绝对路径；不猜测 app bundle、不改变网络配置。
+
+默认存储：
+
+- `~/Library/Application Support/LocalGpuBridge/`：app、config.json、token、launcher.json、client.local.json、jobs、workflows。
+- `~/Library/Logs/LocalGpuBridge/`：固定诊断和 LaunchAgent 日志。
+- `~/Library/Caches/LocalGpuBridge/`：预留私有缓存目录。
+- `~/Library/LaunchAgents/org.orca.local-gpu-bridge.plist`：当前用户服务。
+
+Bridge 自有目录 0700，token/config/launcher/client export 和 app 文件 0600；umask 077。检查属主、类型和权限，拒绝符号链接。已有安装不覆盖；失败后保留已创建内容供人工检查，不自动清理。已有 LaunchAgents 父目录可以是安全的 0755，不擅自 chmod 共享目录。plist 使用参数数组、`-I`、当前用户 GUI domain，无 shell、无 token 参数、无 root LaunchDaemon。`start` 对已加载但退出的 agent 使用 kickstart，对未注册的使用 bootstrap；`stop` 使用 bootout。卸载先预览，仅停止服务并删除自己的 plist/launcher；保留全部应用、配置、token、任务、缓存和日志，更不会删除 ComfyUI、模型或工作流。重装与升级保留人工审查边界，不自动覆盖残留安装。
+
+安装会注册并启动 Bridge，但不会自动启动 ComfyUI。用户在 `http://127.0.0.1:18773/` 点击 Start，选择的可信 ComfyUI 才会执行。专用进程组支持正常停止、超时终止和必要的 SIGKILL；不从持久化 PID 杀进程，不接管外部 ComfyUI。如果端口已被手动启动的实例占用，拒绝托管启动并提示人工处理。
+
+启动固定 `--listen 127.0.0.1`，禁用 custom nodes、API nodes 和浏览器自动打开；旧版本缺少禁用参数时拒绝安装。MPS 可用时使用 ComfyUI 的原生 MPS 选择，不添加 CUDA/OptiX 参数；不可用则明确报告 `backend=cpu, cpu_fallback=true` 并加入 `--cpu`。自定义节点工作流不在本阶段支持范围。ComfyUI 本身必须是用户审核过的可信安装，禁用节点不是操作系统沙箱。第三方 stdout/stderr 不转存，避免敏感内容进入 Bridge 日志；日志只记录固定诊断，调试输出需用户另外在可信本地环境检查。
+
+### 网络与 ready
+
+Bridge 启动前要求 Tailscale `BackendState=Running`、Self 在线、指定地址位于 `100.64.0.0/10` 且属于 Self。安装时记录 Self 与批准 peer 的稳定节点 ID。每个请求先验证 Bearer 和非浏览器 Origin，再实时读取 Tailscale status，核对本机地址/身份、peer IP/节点 ID/在线状态。不接受 X-Forwarded-For 身份。未授权、Tailscale 离线、身份/IP 变化、CLI 超时均拒绝；启动失败不换地址，禁止公网、IPv6、LAN 和 wildcard。运行期间 Tailscale 故障时拒绝请求；恢复同一身份/地址后可继续。登录时网络尚未就绪而退出的服务需用户显式 start。
+
+管理服务只监听 127.0.0.1，检查 Host、会话 token、Origin 和固定路由；远程 Bearer 不写入 HTML。Toolkit 读私有 token 后调用 `/api/health`。只有 installed、launch_agent、tailscale、token、peers、comfyui 六项均真且受管进程及 `/queue` 实际通过时显示 ready。launcher 存在不能判定 ready，token 权限异常、服务/ComfyUI 离线时为 offline。Mac 不自动运行 Windows launcher/native；Toolkit activation 不自动启动 GPU。
+
+没有 Job Objects/Windows Firewall 等价承诺，没有 PF、全局防火墙、通用 shell 或远程脚本接口。原 VPS 客户端的 metadata privacy prerequisite 不变；本阶段没有修改真实 VPS 权限。真实安装、可信代码选择、Tailscale 配置、私密 client export 传输及 GPU 渲染仍等待 ChatGPT 审查和人工批准。

@@ -10,7 +10,7 @@ async function startServer(options){
  const controller=new Controller({...options,dataDir});await controller.initialize();const token=crypto.randomBytes(32).toString('hex');let port;
  const picker=options.directoryPicker||{choose:initial=>options.runtime.chooseDirectory(initial),close:()=>options.runtime.closePicker?.()};
  const remoteBrowser=options.remoteBrowser||new RemoteBrowser(options.runtime);
- const gpuAdmin=options.gpuAdmin||new GpuAdmin();
+ const gpuAdmin=options.gpuAdmin||(options.runtime.platform==='darwin'?controller.gpu.mac:new GpuAdmin());
  const server=http.createServer(async(req,res)=>{
   const origin='http://127.0.0.1:'+port;
   const send=(code,body,type='application/json; charset=utf-8')=>{const bytes=Buffer.from(typeof body==='string'?body:JSON.stringify(body));res.writeHead(code,{'Content-Type':type,'Content-Length':bytes.length,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Content-Security-Policy':`default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; script-src 'nonce-${token}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`});res.end(bytes);};
@@ -18,14 +18,15 @@ async function startServer(options){
    if(req.headers.host!==`127.0.0.1:${port}`)return send(403,{error:'Invalid Host.'});
    if(req.method==='GET'&&req.url==='/favicon.ico')return send(204,'');
    if(req.method==='GET'&&['/','/downloads/','/accounts/'].includes(req.url)){
-    const html=compose(req.url==='/accounts/'?'accounts':req.url==='/downloads/'?'downloads':'overview');
+    const html=compose(req.url==='/accounts/'?'accounts':req.url==='/downloads/'?'downloads':'overview',options.runtime.platform);
     return send(200,html.replaceAll('__TOKEN__',token),'text/html; charset=utf-8');
    }
    if(req.headers['x-toolkit-token']!==token&&req.headers['x-download-token']!==token)return send(403,{error:'Session changed. Reload this page.'});
    if(req.method==='GET'&&req.url==='/api/accounts')return send(200,await controller.readAccounts());
    if(req.method==='GET'&&req.url==='/api/status')return send(200,await controller.status());
-   if(req.method==='GET'&&['/api/gpu/native','/api/gpu/workflows'].includes(req.url)){
+   if(req.method==='GET'&&['/api/gpu/native','/api/gpu/workflows','/api/gpu/health'].includes(req.url)){
     controller.requireGpu();
+    if(options.runtime.platform==='darwin'&&(req.method!=='GET'||!['/api/gpu/workflows','/api/gpu/health'].includes(req.url)))throw new ToolkitError('Only ComfyUI is supported on macOS.');
     return send(200,await gpuAdmin.request(req.url.replace('/api/gpu/','/api/')));
    }
    if(req.method==='GET'&&req.url==='/api/downloads/jobs'){
@@ -45,6 +46,7 @@ async function startServer(options){
    if(req.url==='/api/gpu/open')return send(200,await controller.openGpu());
    if(req.url.startsWith('/api/gpu/')){
     controller.requireGpu();
+    if(options.runtime.platform==='darwin'&&(req.method!=='GET'||!['/api/gpu/workflows','/api/gpu/health'].includes(req.url)))throw new ToolkitError('Only ComfyUI is supported on macOS.');
     return send(200,await gpuAdmin.request(req.url.replace('/api/gpu/','/api/'),body));
    }
    if(req.url==='/api/downloads/remote-browse'){

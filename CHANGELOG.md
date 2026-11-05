@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-05 — macOS ComfyUI Bridge 阶段 4 开发记录
+
+- 复用 Bridge HTTP、工作流、任务/产物和原 VPS MCP；新增 macOS 平台 adapter、私有配置/token、独立安装管理 CLI 与用户级 LaunchAgent。安装/卸载先预览确认，保留用户软件、模型、工作流和任务数据。
+- Bridge 只绑定经验证的本机 Tailscale IPv4；每请求检查 Bearer、allowlist 节点身份和在线状态，离线/IP 变化拒绝，不退化到公网。管理页与托管 ComfyUI 仅监听回环。
+- 原生 arm64/Python 环境检查、MPS 检测及明确 CPU fallback；固定启动参数禁用 custom/API nodes，管理受管进程的启动、停止和超时。Mac 原生 GPU/脚本/通用 shell 均不开放，无 PF 或 Windows 隔离等价承诺。
+- Toolkit Mac GPU ready 要求安装、LaunchAgent、Tailscale、Token、peer 与实际 ComfyUI 健康全部通过；专用面板保留 Windows 行为，Accounts/Downloads 继续沿用阶段 2、3 实现。
+- GPU 专项 68 项通过；Toolkit Node 77 通过/1 Windows 原生跳过；Python Bridge 161 通过/3 Windows 专属跳过。全部使用合成任务、临时目录及 mock，不代表真实 MPS/Tailscale/LaunchAgent/GPU 验收。真实安装、插件更新、私密配置传输与 GPU 任务待审查和人工批准。
+
 ## 2026-11-05 — macOS Downloads 阶段 3 开发记录
 
 - 解除 Downloads preview，复用平台 runtime 和下载引擎；初始化仅表示本地配置可用，远程成功/失败按实际请求更新，任务页面显示持久化状态。Accounts 保持阶段 2，GPU 保持 unsupported。

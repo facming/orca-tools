@@ -97,6 +97,7 @@ def install(settings_file, start=True, startup=True):
     for original, target in copies:
         if original != target:
             shutil.copy2(original, target)
+    shutil.copytree(SOURCE / 'bridge_platform', root / 'app/bridge_platform', dirs_exist_ok=True, ignore=shutil.ignore_patterns('__pycache__'))
     for name in FILES:
         shutil.copy2(SOURCE / name, root / 'app' / name)
     config_file.write_text(json.dumps(config, indent=2), encoding='utf-8')

@@ -8,14 +8,15 @@ function fragment(file){
  const content=html.slice(html.indexOf('<main>'),html.indexOf('<script nonce='));
  return {style,script,content};
 }
-function compose(initial='overview'){
+function compose(initial='overview',platform='win32'){
  let shell=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('__SHELL_STYLE__',fs.readFileSync(path.join(__dirname,'theme.css'),'utf8'));
  const skin=fs.readFileSync(path.join(__dirname,'module-theme.css'),'utf8');
- const definitions=[['accounts','accounts.html','/api/','/api/'],['downloads','modules/downloads/index.html','/api/','/api/downloads/'],['gpu','modules/gpu-panel.html','/api/','/api/gpu/']];
+ const definitions=[['accounts','accounts.html','/api/','/api/'],['downloads','modules/downloads/index.html','/api/','/api/downloads/'],['gpu',platform==='darwin'?'modules/gpu-macos-panel.html':'modules/gpu-panel.html','/api/','/api/gpu/']];
  const scripts=definitions.map(([name,file,from,to])=>{
   const f=fragment(file);let script=f.script;
   if(name==='gpu')script=script.replaceAll("'X-Admin-Token'","'X-Toolkit-Token'");
   script=script.replaceAll("'"+from,"'"+to);
+  if(name==='gpu'&&platform==='darwin')script=script.replace("'/api/gpu/status'","'/api/status'");
   // Static source assembled on the server, not evaluated or fetched as code.
   // Shadow roots isolate old IDs and module state without nested pages/iframes.
   const markup=JSON.stringify('<style>'+f.style+'\n'+skin+'</style>'+f.content).replaceAll('<','\\u003c');

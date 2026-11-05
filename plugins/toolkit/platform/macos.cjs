@@ -92,7 +92,7 @@ function macos({platform, execPath, home, childEnv}, options) {
 
   const library = path.join(home, 'Library'), local = path.join(library, 'Application Support');
   const dataDir = path.join(local, 'OrcaTools');
-  return {platform, home, local, dataDir, configDir: dataDir, cacheDir: path.join(library, 'Caches', 'OrcaTools'),
+  return {platform, home, local, gpuDir: path.join(local, 'LocalGpuBridge'), dataDir, configDir: dataDir, cacheDir: path.join(library, 'Caches', 'OrcaTools'),
     logDir: path.join(library, 'Logs', 'OrcaTools'), downloadsDir: path.join(dataDir, 'downloads'),
     ensurePrivateDirectory, childEnv, cli, userDataPath, loadSdk: () => sdk, ssh, keygen,
     browser: '/usr/bin/open', explorer: '/usr/bin/open'};

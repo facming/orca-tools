@@ -57,7 +57,7 @@ class Controller {
   return {settings:this.settings,error:this.settingsError,modules:{
    accounts:{enabled:this.settings.accounts.enabled,status:!this.settings.accounts.enabled?'disabled':preview?this.accountAvailability:this.settings.accounts.environment?'configured':'needs-setup',manualRefresh:preview,error:this.accountError,accountCount:this.accountSnapshot?.accounts.length??null},
    downloads:{enabled:this.settings.downloads.enabled,status:!this.settings.downloads.enabled?'disabled':this.downloadAvailability||'needs-setup',available:!!this.downloads,error:this.downloadError,jobs:this.downloads?.list().length||0},
-   gpu:{enabled:this.settings.gpu.enabled,status:!this.settings.gpu.enabled?'disabled':preview?'unsupported':gpu.online?'ready':'offline'}
+   gpu:{enabled:this.settings.gpu.enabled,status:!this.settings.gpu.enabled?'disabled':gpu.online?'ready':'offline'}
   }};
  }
  requireDownloads(){if(!this.downloads||!this.settings.downloads.enabled)throw new ToolkitError(this.downloadError||'Configure and enable Downloads first.');return this.downloads;}
@@ -103,7 +103,7 @@ class Controller {
   if(this.accountPreferences.disabled(settings.environment,body.accountId))throw new ToolkitError('Account is disabled. Enable it before switching.');
   return this.accountOperation(settings,()=>this.accounts.select(settings,body,()=>this.settings.accounts===settings&&settings.enabled&&!this.accountPreferences.disabled(settings.environment,body.accountId)));
  }
- requireGpu(){if(this.runtime.platform==='darwin')throw new ToolkitError('GPU services are unavailable on macOS.');if(!this.settings.gpu.enabled)throw new ToolkitError('GPU module is disabled.');}
+ requireGpu(){if(!this.settings.gpu.enabled)throw new ToolkitError('GPU module is disabled.');}
  async openGpu(){this.requireGpu();return this.gpu.open();}
  async close(){if(this.loading)await this.loading.catch(()=>{});if(this.downloads)await this.downloads.close();}
 }
