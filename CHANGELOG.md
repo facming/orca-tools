@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-05 — macOS Toolkit 管理页实机复验
+
+- 经用户批准，通过 Orca 官方界面更新并启用 `5e891a2`。确认 Downloads 预览提示、GPU 入口及 unsupported 状态、manifest 版本显示在实机生效。
+- 验证停用关闭管理端口和待处理的目录选择进程，重新启用可恢复。Mac 针对性测试 6 项通过，未执行 Windows 功能测试。
+- 记录尚未完成的原生目录选择保存与取消验收，以及 Orca 空闲 worker 回收导致管理页断开的已确认限制。
+
 ## 2026-11-04 — macOS 移植阶段 1 开发记录
 
 - Toolkit 入口和管理服务共用平台 runtime。Mac 按运行中的 Orca 包、已审计的相对布局及 profile 定位 CLI 和 SDK，使用私有数据目录与系统 OpenSSH。

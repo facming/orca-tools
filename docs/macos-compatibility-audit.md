@@ -130,4 +130,27 @@ GPU 的主要代价在本地执行。安装器绑定 LOCALAPPDATA、`pythonw.exe
 
 在独立数据目录的实际浏览器页面逐项验证了总览、Accounts、Downloads 和两个 GPU 入口。以替代选择器完成含中文和空格的目录选择、取消和刷新，路径保留。本机已安装版的 Downloads 按钮触发了真实 osascript 目录选择进程，未确认该次选择保存或原生取消结果。手动切换真实 Orca 插件开关至关闭后，再次确认管理端口拒绝连接，GPU 管理端口亦未监听。另观察到一次开关仍显示开启但管理端口已关闭，重新运行命令可恢复。当前 Orca 代码存在空闲 worker 回收机制，缺少本次具体退出原因的证据。
 
-**待审查及人工验收。** 最新修复仍需在实际安装版复核。真实目录选择的保存、取消、TCC 拒绝和管理页长时间驻留有待确认。非默认 profile、Intel Mac、配对握手、账号与远程下载、GPU 执行仍留待后续阶段。
+**待审查及人工验收。** 本次复核时最新修复尚未安装；后续实机结果见第 8 节。非默认 profile、Intel Mac、配对握手、账号与远程下载、GPU 执行仍留待后续阶段。
+
+## 8. 获准更新后的实机复验（2026-11-05）
+
+用户明确批准 `5e891a2` 的本地来源 Toolkit 1.3.1 更新与启用。通过 Orca 官方界面的“从文件夹”流程安装，确认本地来源并启用，未修改安装数据库或绕过审核。新安装目录中的 48 个文件与该提交的插件源码逐一一致。以下结果来自真实 Orca worker 和实际管理页。
+
+| 检查项 | 结果 |
+| --- | --- |
+| 宿主启动与监听 | Open Manager 命令返回 ready，管理服务仅监听 IPv4 回环。 |
+| 总览及版本 | Accounts、Downloads 的卡片和模块状态均为 preview；页脚显示 v1.3.1。 |
+| Accounts | 页面显示 macOS preview，未展示或读取真实账号。 |
+| Downloads | 表单内显示 macOS preview；远程浏览、Start download、Pause all 禁用，本地目录选择按钮可用。 |
+| GPU | 侧栏显示 GPU projects、GPU workflows，总览明确显示 GPU unsupported；两个子页均显示 macOS 不支持，未提供启动按钮。宿主 GPU Workflows 命令返回管理页 workflows 地址，GPU 管理端口未监听。 |
+| 真实目录选择 | 向初始目录传入含中文和空格的空测试目录，确认 worker 启动系统 osascript。自动化工具未暴露该系统对话框的可操作目标，未完成原生选择保存、取消和刷新保留的实机验收。替代选择器的既有测试不能替代此项。 |
+| 停用与恢复 | 在原生选择器等待期间通过 Orca 开关停用插件，确认管理端口拒绝连接，原 worker 和该 osascript 子进程退出；GPU 管理端口仍未监听。随后重新启用并运行 Open Manager，管理页恢复。 |
+| 空闲生命周期 | Orca 插件日志明确记录 `worker reaped after idle period`，确认此前开关开启但页面断开的一次原因为宿主空闲回收。长期驻留验收未通过；当前可重新执行 Open Manager 恢复。需后续审查宿主支持的生命周期方案，不以伪造活动绕过回收。 |
+
+针对 Mac 平台、模拟激活和统一页面重新运行以下测试：6 通过、0 失败、3 个不匹配用例跳过。Windows 用例未执行，继续遵循第 7 节范围排除。
+
+```sh
+node --test --test-name-pattern='^(running macOS|missing, non-executable|profile override|open and folder selection|macOS activation|all views share one shell)' plugins/toolkit/test-unified-ui.cjs plugins/toolkit/test-platform.cjs
+```
+
+本轮未调用真实 Accounts RPC，未执行远程下载、生成密钥或启动 GPU/ComfyUI，也未修改 TCC 或其他系统安全设置。原生目录选择的保存、取消、刷新保留及 TCC 拒绝仍需可操作的系统对话框验收；不能宣称阶段 1 实机验收全部通过。
