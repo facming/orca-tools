@@ -31,7 +31,7 @@ test('local folder, remote source and directory preferences merge and remain ser
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 test('authenticated UI restores manual remote addresses and browsed directories after restart',async()=>{
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-remote-http-'));let service;const options={port:0,dataDir:path.join(root,'settings'),runtime:{home:root,local:root,childEnv:{}},
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'toolkit-remote-http-'));let service;const options={port:0,dataDir:path.join(root,'settings'),runtime:{platform:'win32',home:root,local:root,childEnv:{}},
   createDownloads:()=>({list:()=>[],close:async()=>{}}),gpu:{async status(){return {online:false};}},remoteBrowser:{async list(environment,{directory}){assert.equal(environment,'Server');return {directory:directory||'/home/worker',parent:'/',entries:[],offset:0,total:0,hasMore:false};}}};
  try{
   fs.mkdirSync(options.dataDir,{recursive:true});fs.writeFileSync(path.join(options.dataDir,'settings.json'),JSON.stringify({downloads:{enabled:true,environment:'Server',sshHost:'100.64.0.20',sshUser:'worker',sshPort:22}}));

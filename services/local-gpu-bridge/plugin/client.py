@@ -136,6 +136,12 @@ def file_digest(file):
         for data in iter(lambda:stream.read(1024*1024),b''):h.update(data)
     return h.hexdigest()
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Bridge routes never redirect, including same-origin and POST redirects."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 class Client:
     def __init__(self, config_path):
         config = json.loads(pathlib.Path(config_path).read_text(encoding='utf-8'))
@@ -147,7 +153,7 @@ class Client:
         if not isinstance(config.get('token'), str) or len(config['token']) < 32: raise ValueError('Invalid bridge credential.')
         self.base = config['url'].rstrip('/'); self.token = config['token']
         self.require_private_metadata = config.get('require_private_tailnet_metadata', False)
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
     def privacy_check(self):
         if not self.require_private_metadata: return
         probe = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -170,10 +176,11 @@ class Client:
         except urllib.error.HTTPError as error:
             if error.code == 403:
                 error.close(); raise ValueError('Bridge access denied. Check the configured token and allowed Tailscale peer.') from None
-            try: detail = json.loads(error.read(8192)).get('error', 'Bridge request failed.')
-            except (ValueError, AttributeError): detail = 'Bridge request failed.'
-            finally: error.close()
-            raise ValueError(str(detail)[:2000]) from None
+            # Neither Location, reason, nor response body is trusted: a server
+            # can reflect credentials/request headers in any of them.
+            error.close()
+            detail = 'Bridge redirects are disabled.' if 300 <= error.code < 400 else 'Bridge request failed (HTTP 404; unsupported or unavailable resource).' if error.code == 404 else 'Bridge request failed (HTTP %d).' % error.code
+            raise ValueError(detail) from None
         except (urllib.error.URLError, TimeoutError):
             raise ValueError('The local GPU computer is unreachable. Check that this computer, Tailscale and Local GPU Bridge are running; keep the same request_id when retrying a submission.') from None
     def tripo_tools(self):

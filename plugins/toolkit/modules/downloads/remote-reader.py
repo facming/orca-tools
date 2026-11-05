@@ -9,12 +9,58 @@ import stat
 import sys
 
 
-def atomic_json(path, value):
-    temp = path.with_suffix('.tmp-' + str(os.getpid()))
-    with temp.open('x') as stream:
-        json.dump(value, stream)
-    temp.chmod(0o600)
-    temp.replace(path)
+# Installed beside the reader; source-tree tests add the Toolkit directory.
+from private_files import PrivateDirectory
+import contextlib
+
+
+@contextlib.contextmanager
+def authorization_state():
+    ssh = PrivateDirectory(str(pathlib.Path.home() / '.ssh'))
+    try:
+        with ssh.lock('.orca-authorized-keys.lock', timeout=10):
+            jobs = PrivateDirectory(str(pathlib.Path.home() / '.local/share/orca-parallel-download/jobs'))
+            try:
+                yield ssh, jobs
+            finally:
+                jobs.close()
+    finally:
+        ssh.close()
+
+
+def job_record(jobs, job_id):
+    data, version = jobs.read(job_id + '.json')
+    return (None if data is None else json.loads(data)), version
+
+
+def cleanup(job_id):
+    if not re.fullmatch(r'[a-f0-9]{32}', job_id):
+        raise ValueError('Invalid job ID')
+    with authorization_state() as (keys, jobs):
+        job, version = job_record(jobs, job_id)
+        if not job or job.get('protocol') != 2 or not isinstance(job.get('authorization'), str) or not re.fullmatch(r'ssh-ed25519 [A-Za-z0-9+/=]+', job.get('key', '')):
+            raise ValueError('Missing or legacy ownership record; manual cleanup required')
+        data, original = keys.read('authorized_keys')
+        if data is None:
+            raise ValueError('Missing authorized_keys; manual inspection required')
+        owned = job['authorization'].encode() + b'\n'
+        lines = data.splitlines(keepends=True)
+        count = lines.count(owned)
+        if count > 1 or (job.get('cleaned') and count):
+            raise ValueError('Ambiguous authorization ownership')
+        # Exact line equality, never substring/tag matching. Keep a tombstone
+        # so a lost reply can be retried without guessing ownership.
+        remaining = b''.join(line for line in lines if line != owned)
+        if re.search(rb'(?:^|[ \t])' + re.escape(job['key'].encode()) + rb'(?=[ \t\r\n]|$)', remaining, re.MULTILINE):
+            raise ValueError('Task public key exists in an unowned line; manual cleanup required')
+        if count:
+            keys.replace('authorized_keys', remaining, original)
+        job['cleaned'] = True
+        jobs.replace(job_id + '.json', json.dumps(job).encode(), version)
+        keys.check()
+        if owned in (keys.read('authorized_keys')[0] or b'').splitlines(keepends=True):
+            raise ValueError('Authorization remains; manual cleanup required')
+    return 'KEY_REMOVED:' + job_id
 
 
 def fingerprint(info):
@@ -39,19 +85,30 @@ def register(request):
             digest.update(block)
     if fingerprint(source.stat()) != fingerprint(info):
         raise ValueError('Source changed while preparing download')
-    root = pathlib.Path.home() / '.local/share/orca-parallel-download'
-    root.mkdir(parents=True, mode=0o700, exist_ok=True)
-    (root / 'jobs').mkdir(mode=0o700, exist_ok=True)
-    job = {'source': str(source), 'fingerprint': fingerprint(info), 'tag': 'orca-download:' + job_id}
-    atomic_json(root / 'jobs' / (job_id + '.json'), job)
-    keys = pathlib.Path.home() / '.ssh/authorized_keys'
     script = pathlib.Path(__file__).resolve()
     command = 'python3 ' + shlex.quote(str(script)) + ' ' + job_id
+    # Normalize the comment to the unique task ID. The complete line is the
+    # ownership record, including forced-command and key material.
+    public_key = ' '.join(public_key.split()[:2]) + ' orca-download:' + job_id
     line = 'restrict,command="' + command.replace('"', '\\"') + '" ' + public_key
-    existing = keys.read_text() if keys.exists() else ''
-    with keys.open('a') as stream:
-        stream.write(('\n' if existing and not existing.endswith('\n') else '') + line + '\n')
-    keys.chmod(0o600)
+    job = {'protocol': 2, 'source': str(source), 'fingerprint': fingerprint(info),
+           'authorization': line, 'key': ' '.join(public_key.split()[:2]), 'cleaned': False}
+    with authorization_state() as (keys, jobs):
+        previous, version = job_record(jobs, job_id)
+        data, original = keys.read('authorized_keys')
+        data = data or b''
+        if previous is not None and previous != job:
+            raise ValueError('Task identity already exists; create a new download')
+        owned = line.encode() + b'\n'
+        if previous is None:
+            if owned in data.splitlines(keepends=True):
+                raise ValueError('Authorization has no ownership record')
+            jobs.replace(job_id + '.json', json.dumps(job).encode(), version)
+        count = data.splitlines(keepends=True).count(owned)
+        if count > 1:
+            raise ValueError('Duplicate authorization')
+        if not count:
+            keys.replace('authorized_keys', data + (b'\n' if data and not data.endswith(b'\n') else b'') + owned, original)
     return {'size': info.st_size, 'sha256': digest.hexdigest(), 'source': str(source),
             'hostKey': ' '.join(host_key[:2]), 'fingerprint': fingerprint(info)}
 
@@ -60,20 +117,14 @@ def main():
     job_id = sys.argv[1]
     if not re.fullmatch(r'[a-f0-9]{32}', job_id):
         raise ValueError('Invalid job ID')
-    path = pathlib.Path.home() / '.local/share/orca-parallel-download/jobs' / (job_id + '.json')
-    job = json.loads(path.read_text())
     args = shlex.split(os.environ.get('SSH_ORIGINAL_COMMAND', ''))
     if args == ['done']:
-        keys = pathlib.Path.home() / '.ssh/authorized_keys'
-        lines = keys.read_text().splitlines(keepends=True)
-        remaining = ''.join(line for line in lines if job['tag'] not in line)
-        temp = keys.with_suffix('.orca-' + job_id)
-        temp.write_text(remaining)
-        temp.chmod(0o600)
-        temp.replace(keys)
-        path.unlink()
-        print('KEY_REMOVED')
+        print(cleanup(job_id))
         return
+    with authorization_state() as (_, jobs):
+        job, _ = job_record(jobs, job_id)
+        if not job or job.get('cleaned'):
+            raise ValueError('Task unavailable')
     if len(args) != 3 or args[0] != 'read':
         raise ValueError('Only bounded reads are allowed')
     offset, count = int(args[1]), int(args[2])

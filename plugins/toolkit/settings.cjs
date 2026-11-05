@@ -2,6 +2,8 @@
 const fs=require('node:fs'),path=require('node:path');
 const {ToolkitError}=require('./platform/errors.cjs');
 const {validate:validateDownload}=require('./modules/downloads/settings.cjs');
+const privateJson=require('./private-json.cjs');
+const versions=new Map(),snapshots=new WeakMap();
 const defaults=()=>({accounts:{enabled:true,environment:'',worktree:''},downloads:{enabled:true,environment:'',sshHost:'',sshUser:'',sshPort:22},gpu:{enabled:true}});
 function validate(value){
  if(!value||typeof value!=='object'||Array.isArray(value))throw new ToolkitError('Expected settings object.');
@@ -23,7 +25,8 @@ function validate(value){
  if(a.worktree&&!/^path:\//.test(a.worktree))throw new ToolkitError('Remote worktree must start with path:/');
  return result;
 }
-function load(root,downloadsDir){
+function load(root,downloadsDir,platform=process.platform){
+ if(platform==='darwin'){const result=privateJson.read(root,'settings.json');const value=result.value===null?defaults():validate(result.value);versions.set(path.resolve(root),result.version);snapshots.set(value,result.version);return value;}
  fs.mkdirSync(root,{recursive:true});const file=path.join(root,'settings.json');
  if(fs.existsSync(file))return validate(JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,'')));
  const result=defaults();if(!downloadsDir)return result;
@@ -33,5 +36,7 @@ function load(root,downloadsDir){
  }
  return result;
 }
-function save(root,value){const clean=validate(value),file=path.join(root,'settings.json');fs.mkdirSync(root,{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(clean,null,2),{mode:0o600});fs.renameSync(file+'.tmp',file);return clean;}
+function save(root,value,previous,platform=process.platform){const clean=validate(value);
+ if(platform==='darwin'){const key=path.resolve(root);if(!versions.has(key))load(root);const result=privateJson.write(root,'settings.json',clean,previous&&snapshots.has(previous)?snapshots.get(previous):versions.get(key));versions.set(key,result.version);snapshots.set(clean,result.version);return clean;}
+ const file=path.join(root,'settings.json');fs.mkdirSync(root,{recursive:true});fs.writeFileSync(file+'.tmp',JSON.stringify(clean,null,2),{mode:0o600});fs.renameSync(file+'.tmp',file);return clean;}
 module.exports={defaults,validate,load,save};

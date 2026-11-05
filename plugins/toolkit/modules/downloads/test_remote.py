@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 reader = pathlib.Path(__file__).with_name('remote-reader.py')
 job_id = 'a' * 32
 with tempfile.TemporaryDirectory(prefix='orca-reader-test-') as folder:
@@ -16,16 +17,17 @@ with tempfile.TemporaryDirectory(prefix='orca-reader-test-') as folder:
     source.write_bytes(data)
     info = source.stat()
     jobs = home / '.local/share/orca-parallel-download/jobs'
-    jobs.mkdir(parents=True)
+    jobs.mkdir(parents=True, mode=0o700)
     job_path = jobs / (job_id + '.json')
     job_path.write_text(json.dumps({'source': str(source),
         'fingerprint': [info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns],
-        'tag': 'orca-download:' + job_id}))
+        'protocol': 2, 'key': 'ssh-ed25519 U1lOVEhFVElD', 'cleaned': False, 'authorization': 'TEST orca-download:' + job_id}))
     keys = home / '.ssh/authorized_keys'
-    keys.parent.mkdir()
+    keys.parent.mkdir(mode=0o700)
     keys.write_text('PRESERVE_OTHER_KEY\nTEST orca-download:' + job_id + '\n')
+    keys.chmod(0o600);job_path.chmod(0o600)
     def call(command):
-        env = dict(os.environ, HOME=folder, USERPROFILE=folder, SSH_ORIGINAL_COMMAND=command)
+        env = dict(os.environ, HOME=folder, USERPROFILE=folder, SSH_ORIGINAL_COMMAND=command, PYTHONPATH=str(reader.resolve().parents[2]))
         return subprocess.run([sys.executable, str(reader), job_id], env=env, capture_output=True)
     result = call('read 19 70')
     assert result.returncode == 0 and result.stdout == data[19:89]
@@ -35,7 +37,7 @@ with tempfile.TemporaryDirectory(prefix='orca-reader-test-') as folder:
     source.write_bytes(data + b'changed')
     assert call('read 0 8').returncode != 0
     assert call('done').returncode == 0
-    assert keys.read_text() == 'PRESERVE_OTHER_KEY\n' and not job_path.exists()
+    assert keys.read_text() == 'PRESERVE_OTHER_KEY\n' and json.loads(job_path.read_text())['cleaned']
 print('PASS: exact ranges, command rejection, bounds, changed-source rejection, scoped key cleanup.')
 
 # Registration runs only with an isolated HOME and a synthetic host public key.
@@ -46,7 +48,7 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 with tempfile.TemporaryDirectory(prefix='orca-register-test-') as folder:
     home = pathlib.Path(folder)
-    (home / '.ssh').mkdir()
+    (home / '.ssh').mkdir(mode=0o700)
     source = home / '中文 file.bin'
     source.write_bytes(b'synthetic data')
     original_read_text = pathlib.Path.read_text

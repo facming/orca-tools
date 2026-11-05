@@ -12,7 +12,7 @@ class Controller {
   this.runtime.ensurePrivateDirectory?.(this.root);
   this.accountSnapshot=null;this.accountAvailability='preview';this.accountError='';this.accountRequest=0;
   this.accountPreferences=new AccountPreferences(this.root,{privateFiles:this.runtime.platform==='darwin'});
-  try{this.settings=settings.load(this.root,this.runtime.platform==='darwin'?null:this.runtime.downloadsDir);}catch{this.settings=settings.defaults();this.settingsError='Settings could not be loaded. Save valid settings to repair them.';}
+  try{this.settings=settings.load(this.root,this.runtime.platform==='darwin'?null:this.runtime.downloadsDir,this.runtime.platform);}catch{this.settings=settings.defaults();this.settingsError='Settings could not be loaded. Original file retained; repair it manually before saving.';}
  }
  async initialize(){await this.configureDownloads();}
  async configureDownloads(){
@@ -45,7 +45,7 @@ class Controller {
     if(jobs.some(j=>!['complete','cancelled'].includes(j.status)||j.cleanupWarning))throw new ToolkitError('Finish or cancel pending downloads and clear temporary access before changing the remote target.');
    }
    const accountsChanged=JSON.stringify(next.accounts)!==JSON.stringify(this.settings.accounts);
-   this.settings=settings.save(this.root,next);this.settingsError='';
+   this.settings=settings.save(this.root,next,this.settings,this.runtime.platform);this.settingsError='';
    if(accountsChanged){this.accountRequest++;this.accountSnapshot=null;this.accountAvailability='preview';this.accountError='';}if(changed)await this.configureDownloads();
   })();
   try{await this.loading;}finally{this.loading=null;}

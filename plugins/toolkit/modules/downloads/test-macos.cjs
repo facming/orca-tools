@@ -14,11 +14,11 @@ function transportFixture(t,platform='darwin'){
  const tr=new SshTransport({dataDir:path.join(root,'私有 state'),runtime:r,environment:'Mock environment',sshHost:'100.64.0.20',sshUser:'worker',sshPort:2222,wait:async()=>{},onConnection:s=>states.push(s),
   async execute(exe,args,opts){calls.push({exe,args,opts});assert.equal(opts.env,r.childEnv);
    if(exe===r.keygen){const key=args[args.indexOf('-f')+1];fs.writeFileSync(key,'SYNTHETIC-NOT-A-KEY',{mode:0o600});fs.writeFileSync(key+'.pub','ssh-ed25519 U1lOVEhFVElD orca-download:'+job.id);return {stdout:''};}
-   if(exe===r.ssh){if(failSsh)throw Error('fixture secret');return {stdout:'KEY_REMOVED\n'};}
+   if(exe===r.ssh){if(failSsh)throw Error('fixture secret');return {stdout:'KEY_REMOVED:'+job.id+'\n'};}
    assert.equal(exe,r.cli);assert.deepEqual(args.slice(-3),['--environment','Mock environment','--json']);
    let result={};if(args[0]==='repo')result={repos:[{path:'/project'}]};
    if(args[1]==='create'){cleanup=args.includes('Clear transfer access');const command=args[args.indexOf('--command')+1];script=zlib.inflateSync(Buffer.from(command.match(/decode\("([^"]+)"/)[1],'base64')).toString();result={terminal:{handle:'mock-terminal'}};}
-   if(args[1]==='read'){if(failCleanup&&cleanup)throw Error('fixture secret');result={terminal:{tail:[cleanup?'ORCA_DOWNLOAD_CLEANED='+job.id:'ORCA_DOWNLOAD_META='+JSON.stringify(meta)]}};}
+   if(args[1]==='read'){if(failCleanup&&cleanup)throw Error('fixture secret');result={terminal:{tail:[cleanup?script.match(/ORCA_DOWNLOAD_CLEANED=[a-f0-9]+:[a-f0-9]+/)[0]:'ORCA_DOWNLOAD_META='+JSON.stringify(meta)]}};}
    return {stdout:JSON.stringify({ok:true,result})};
   },spawn(exe,args,opts){calls.push({exe,args,opts});const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.kill=()=>setImmediate(()=>child.emit('close',1));setImmediate(()=>{child.stdout.write('DATA');child.stdout.end();child.emit('close',0);});return child;}
  });
@@ -41,7 +41,7 @@ test('macOS and Windows SSH fixtures isolate identities, pin host keys and use b
 test('transport rejects out-of-project paths before keygen, unsafe key files and preserves keys on cleanup failure',macOnly,async t=>{
  const f=transportFixture(t);for(const source of ['/etc/passwd','/project/../etc/passwd','/project2/file'])await assert.rejects(f.tr.prepare({...f.job,source}));assert.equal(f.calls.some(c=>c.exe===f.r.keygen),false);
  await f.tr.prepare(f.job);const key=path.join(f.tr.directory(f.job),'key');fs.chmodSync(key,0o644);assert.throws(()=>f.tr.arguments(f.job),/unsafe/);fs.chmodSync(key,0o600);
- f.fail();await assert.rejects(f.tr.cleanup(f.job));assert.ok(fs.existsSync(key));f.fallback();await f.tr.cleanup(f.job);assert.ok(!fs.existsSync(key));assert.match(f.script,/orca-download:/);assert.match(f.script,/ORCA_DOWNLOAD_CLEANED/);
+ f.fail();await assert.rejects(f.tr.cleanup(f.job));assert.ok(fs.existsSync(key));f.fallback();await f.tr.cleanup(f.job);assert.ok(!fs.existsSync(key));assert.match(f.script,/m.cleanup\(/);assert.match(f.script,/ORCA_DOWNLOAD_CLEANED/);
 });
 async function settled(m,id){for(let i=0;i<3000;i++){if(!m.runs.has(id))return m.jobs.get(id);await sleep(5);}throw Error('Timeout');}
 function engineFixture(t,size=24*1024*1024){

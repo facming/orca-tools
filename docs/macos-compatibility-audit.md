@@ -583,3 +583,16 @@ python3 scripts/check.py
 ```
 
 全量套件中 malformed workflow 的预期异常日志和既有 ResourceWarning 不是测试失败。上述通过数不包含平台跳过；未运行真实 Unity 编译或 GPU。Windows native 四文件、macOS Blender 主 adapter、ComfyUI 两份阶段 4 安全测试与基线逐字一致。存储/安装导入为临时目录，生产测试结果未写入仓库。
+
+
+## 2026-11-05：阶段 7B-1 安全加固补充（BLOCKED）
+
+仅针对 [发布审计](macos-release-readiness-audit.md) H-01/H-02/H-03。H-01 原默认 opener 的跨端口 Bearer 泄漏已用双回环服务复现；新默认拒绝所有重定向及不反射 HTTP 错误内容，160 个 GET/POST/stream/地址与协议组合通过，全部 Bridge 301 项中 298 通过、3 跳过。
+
+H-02 原固定 tmp 链接覆盖已用 #8 原代码复现；macOS 改用小型 Python POSIX helper，目录描述符、O_NOFOLLOW/O_EXCL、随机临时文件、0700/0600、flock、版本/hash 检查和原子替换。损坏/外部修改不静默覆盖；新 Python 依赖缺失时报错。通用设置每个 Controller 保存自己的读取版本，偏好单快照合并。Windows 原路径不调用 helper；Accounts 专用偏好代码不变。
+
+H-03 原 cleanup 丢失读取后新增 key 已用 #8 原代码复现；register/SSH done/fallback 共用锁与完整授权行归属，重复清理保留 tombstone，异常不发新成功回执、不删本机 key。SSH 回执绑定任务 ID，fallback 另带随机 nonce。旧任务/旧 reader 不兼容新并发协议，必须在后续获准维护窗口人工核对，禁止混跑。未知/远程文件系统拒绝；Linux 分支只经代码审阅，未做真实 Linux/VPS 验收。
+
+**H-02/H-03 仍未关闭。** `reproduce-unresolved-races.py` 退出 1，证明最后身份比较与 renameat 之间的非合作写入仍可能被覆盖，H-03 此时仍可能误报清理成功。Node 不具备必要的 descriptor API，CPython 原生绑定缩小了路径攻击面，但 advisory 锁不能强制人工编辑器遵守；改用 C 实现相同调用也不提供原子条件替换。新增 helper 仍需独立安全审查，不能称为已批准的原生安全实现。
+
+全 Toolkit/Downloads Node 98 项：97 通过、1 跳过；Remote Reader 原回归及 13 项安全测试通过；100 轮 APFS 并发注册/清理通过。**这些通过不覆盖上述两个已复现的失败窗口。** 修复细节、逐项测试、原始复现、文件系统 allowlist、断电/磁盘故障、Python 依赖和人工迁移事项见发布审计的 7B-1 记录。真实业务验收依旧未进行，不修改原阶段 0/后续记录为 PASS。
