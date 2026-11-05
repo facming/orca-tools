@@ -172,3 +172,30 @@ node --test --test-name-pattern='^(macOS AppleScript|running macOS|missing, non-
 **人工配合实机复验通过。** 从新版 Downloads 打开真实系统目录窗口，由用户点击选取含中文及空格的测试目录；页面返回 “Download folder selected.”，刷新后路径保留，生成的目录偏好文件权限为 0600。再次打开窗口并由用户点击取消，等待提示消失、Browse 按钮恢复，原目录不变；再刷新确认仍保留。此前“选中目录即报错”的故障不再出现，选中保存、刷新保留、原生取消三项通过。
 
 上述结果来自用户点击原生对话框及自动化读取页面回执，区别于仅替代对话框的自动测试。TCC 拒绝行为仍未验证。第 8 节已确认的宿主空闲回收限制未在此次修复中处理。
+
+
+## 10. 阶段 2 Accounts 实施记录（2026-11-05）
+
+基线为 PR #2 的最新 head `a2ad0c36e47e1192a97f7f4bc6cf9e6ee908131c`；本地阶段 1 分支与 origin 相同，开始时工作区干净。新分支 `feature/macos-accounts` 从 `feature/macos-platform-runtime` 创建，Draft PR 以该阶段 1 分支为 base，不修改 main。
+
+**实现。** 复用 `modules/accounts.cjs`、`remote-runtime.cjs`、Controller、server 和原账号卡片页面。RuntimeClient 从阶段 1 的 `runtime.loadSdk()`、`runtime.userDataPath`、`runtime.cli` 和显式配置的 environment 构造，保留 30 秒超时和 profile 发现校验。没有自动发现 environment 或读取配对材料的新入口。
+
+Mac 激活、初始化、页面打开、`GET /api/accounts`、`GET /api/status` 及总览刷新均不产生 Accounts RPC；页面先显示 preview 和手动刷新提示。只有用户明确刷新、切换或启用/禁用账号时才调用已有业务流程。请求成功且通过远程身份、回包和本地偏好校验后显示 ready；错误或配置更改会清除快照和 ready。ready 表示最近一次请求成功，不表示持续探测连接。错误按固定代码映射为权限、配对、协议、超时和断开诊断，未知错误给出通用检查建议，不输出 SDK 原始消息。
+
+保留邮箱脱敏、当前账号、登录状态、用量归属与旧 SDK 双快照检查、用量和重置时间；补充 `usageStatus.state` 的 ready / stale / unknown / error 分类，原细分 code 保留。账号切换继续校验 ID、当前状态、`expectedActiveAccountId`、单次切换锁、配置是否改变和切换后的 `activeAccountId`。即使目标已是当前账号，也先验证 expected ID。切换超时或确认读取失败不自动重试、不报告成功。
+
+Mac 本地偏好恢复到 `runtime.configDir`。目录 0700、文件 0600，仅保存 environment 与账号 ID；独占随机临时文件后原子替换。损坏文件、启动后外部修改、不安全模式、属主不符或符号链接均失败关闭，不自动修复覆盖。Windows 原有偏好保存与远程读取方式保留。
+
+| 检查项 | 本轮证据与结果 |
+| --- | --- |
+| Accounts 针对性测试 | `node --test plugins/toolkit/test-accounts.cjs plugins/toolkit/test-macos-accounts.cjs`：22 通过，0 失败。 |
+| Toolkit 全量 Node 测试 | `node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs`：61 项，60 通过、0 失败、1 跳过。跳过的是需要已安装 Windows Orca/OpenSSH 的原生探针；Mac 上的 Windows 夹具与模拟启动回归通过，不等于 Windows 实机验收。 |
+| RuntimeClient / RPC | 仅 mock SDK：Mac 构造参数、environment 更改、无配置拒绝、isRemote=false（含缓存 client）、ok=false、缺失/非法 runtimeId、SDK 加载失败及不兼容响应；初始化和被动 GET 的 client 构造与 RPC 计数均为 0。 |
+| 数据与偏好 | 合成邮箱、登录标记、重置时间、用量归属、四种用量状态；偏好保存/恢复/环境隔离、0600/0700、损坏和外部改动拒绝、符号链接与不安全权限拒绝。未保存 OAuth、Cookie、Token 或密码。 |
+| 切换与错误 | 非法 ID、缺失/需登录账号、expected ID 不匹配、配置漂移、重复切换与切换中禁用/刷新拒绝、切换后 active ID 不匹配；权限/配对/协议/超时/断开模拟错误；切换及后验读取失败均不成功、不重试。 |
+| 自动化页面交互 | Node VM 执行生产 Accounts 脚本并经过真实回环 HTTP 路由，模拟 DOM 验证刷新、显示、禁用/启用、切换期间按钮锁定、失败及设置更改。独立浏览器访问同一 mock SDK 管理服务，完成可见刷新、三个合成账号卡片、禁用/启用和切换后 Selected 验证；总览显示 3，Downloads 预览、GPU unsupported。 |
+| 浏览器发现的修复 | 统一 shell 样式隐藏模块标题栏，原 Refresh usage 按钮随之不可见；将按钮移到内容区并复验可见、可点击，补充回归断言。没有重新设计管理页。 |
+
+**测试与真实验收严格区分。** 本轮没有安装或激活真实 Orca 插件，没有调用真实 `accounts.list` / `accounts.selectClaude`，没有读取真实账号、用量、配对材料、OAuth、Cookie 或 Token，也没有自动使用真实 environment。HTTP 服务只在回环地址与临时配置目录中运行，所有 Accounts 数据来自 `fixtures/accounts.cjs` 的合成 RuntimeClient。没有开放 Downloads 或 GPU。
+
+**仍待验证。** 真实远程配对、权限与 RPC 错误码/回包兼容性、真实用量归属及切换后新建 Claude 会话的账号，须在 ChatGPT 审查和人工授权后单独验收；不宣称真实账号能力已通过实机验证。阶段 1 的宿主空闲 worker 回收及 TCC 拒绝未在本阶段解决，Intel 与 Windows 原生环境未做实机验证。

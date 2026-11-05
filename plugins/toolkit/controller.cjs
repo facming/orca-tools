@@ -10,7 +10,8 @@ class Controller {
   this.options=options;this.runtime=options.runtime;this.root=options.dataDir??this.runtime.configDir;this.downloads=null;this.downloadError='';this.settingsError='';
   this.accounts=options.accounts||new Accounts(this.runtime);this.gpu=options.gpu||new Gpu(this.runtime);this.loading=null;
   this.runtime.ensurePrivateDirectory?.(this.root);
-  this.accountPreferences=this.runtime.platform==='darwin'?null:new AccountPreferences(this.root);
+  this.accountSnapshot=null;this.accountAvailability='preview';this.accountError='';this.accountRequest=0;
+  this.accountPreferences=new AccountPreferences(this.root,{privateFiles:this.runtime.platform==='darwin'});
   try{this.settings=settings.load(this.root,this.runtime.platform==='darwin'?null:this.runtime.downloadsDir);}catch{this.settings=settings.defaults();this.settingsError='Settings could not be loaded. Save valid settings to repair them.';}
  }
  async initialize(){await this.configureDownloads();}
@@ -41,7 +42,9 @@ class Controller {
     }
     if(jobs.some(j=>!['complete','cancelled'].includes(j.status)||j.cleanupWarning))throw new ToolkitError('Finish or cancel pending downloads and clear temporary access before changing the remote target.');
    }
-   this.settings=settings.save(this.root,next);this.settingsError='';if(changed)await this.configureDownloads();
+   const accountsChanged=JSON.stringify(next.accounts)!==JSON.stringify(this.settings.accounts);
+   this.settings=settings.save(this.root,next);this.settingsError='';
+   if(accountsChanged){this.accountRequest++;this.accountSnapshot=null;this.accountAvailability='preview';this.accountError='';}if(changed)await this.configureDownloads();
   })();
   try{await this.loading;}finally{this.loading=null;}
   return this.status();
@@ -50,7 +53,7 @@ class Controller {
   let gpu={online:false};try{gpu=await this.gpu.status();}catch{}
   const preview=this.runtime.platform==='darwin';
   return {settings:this.settings,error:this.settingsError,modules:{
-   accounts:{enabled:this.settings.accounts.enabled,status:!this.settings.accounts.enabled?'disabled':preview?'preview':this.settings.accounts.environment?'configured':'needs-setup'},
+   accounts:{enabled:this.settings.accounts.enabled,status:!this.settings.accounts.enabled?'disabled':preview?this.accountAvailability:this.settings.accounts.environment?'configured':'needs-setup',manualRefresh:preview,error:this.accountError,accountCount:this.accountSnapshot?.accounts.length??null},
    downloads:{enabled:this.settings.downloads.enabled,status:!this.settings.downloads.enabled?'disabled':preview?'preview':this.downloads?'ready':'needs-setup',error:this.downloadError,jobs:this.downloads?.list().length||0},
    gpu:{enabled:this.settings.gpu.enabled,status:!this.settings.gpu.enabled?'disabled':preview?'unsupported':gpu.online?'ready':'offline'}
   }};
@@ -58,8 +61,31 @@ class Controller {
  requireDownloads(){if(this.runtime.platform==='darwin')throw new ToolkitError('Downloads are in preview on macOS.');if(!this.downloads||!this.settings.downloads.enabled)throw Error(this.downloadError||'Downloads module is disabled.');return this.downloads;}
  requireAccounts(){if(!this.settings.accounts.enabled)throw new ToolkitError('Accounts module is disabled.');return this.settings.accounts;}
  async openAccounts(){this.requireAccounts();return {opened:true,url:'/accounts/'};}
- requireRemoteAccounts(){if(this.runtime.platform==='darwin')throw new ToolkitError('Accounts are in preview on macOS.');return this.requireAccounts();}
- async accountState(refreshUsage=false){const settings=this.requireRemoteAccounts();const state=await this.accounts.list(settings,refreshUsage);if(this.settings.accounts!==settings)throw new ToolkitError('Remote connection changed. Refresh accounts.');return this.accountPreferences.apply(settings.environment,state);}
+ requireRemoteAccounts(){return this.requireAccounts();}
+ // Passive macOS reads never construct RuntimeClient or touch pairing/profile data.
+ async readAccounts(){
+  if(this.runtime.platform!=='darwin')return this.accountState();
+  this.requireAccounts();
+  return {...(this.accountSnapshot||{activeAccountId:null,accounts:[]}),availability:this.accountAvailability,requiresRefresh:!this.accountSnapshot,message:this.accountError||(!this.accountSnapshot?'macOS preview: click Refresh usage to connect to your configured remote environment. This may update its recent-use state in Orca.':'')};
+ }
+ async accountOperation(settings,operation){
+  const request=++this.accountRequest;
+  try{
+   const state=await operation();
+   if(this.settings.accounts!==settings)throw new ToolkitError('Remote connection changed. Refresh accounts.');
+   const result=this.accountPreferences.apply(settings.environment,state);
+   if(request===this.accountRequest){this.accountSnapshot=result;this.accountAvailability='ready';this.accountError='';}
+   return result;
+  }catch(error){
+   if(request===this.accountRequest&&this.settings.accounts===settings){this.accountSnapshot=null;this.accountAvailability='error';this.accountError=error instanceof ToolkitError?error.message:'Remote accounts request failed. Refresh to retry.';}
+   throw error;
+  }
+ }
+ async accountState(refreshUsage=false){
+  const settings=this.requireRemoteAccounts();
+  if(this.accounts.switching)throw new ToolkitError('An account switch is in progress. Refresh shortly.');
+  return this.accountOperation(settings,()=>this.accounts.list(settings,refreshUsage));
+ }
  async setAccountDisabled(body){
   if(Object.keys(body).some(k=>!['accountId','disabled'].includes(k))||typeof body.accountId!=='string'||!body.accountId||body.accountId.length>200||typeof body.disabled!=='boolean')throw new ToolkitError('Invalid account preference.');
   const settings=this.requireAccounts(),state=await this.accountState();
@@ -67,9 +93,14 @@ class Controller {
   if(this.accounts.switching)throw new ToolkitError('An account switch is in progress. Refresh shortly.');
   if(!state.accounts.some(a=>a.id===body.accountId))throw new ToolkitError('Account not found. Refresh to try again.');
   this.accountPreferences.set(settings.environment,body.accountId,body.disabled);
-  return this.accountPreferences.apply(settings.environment,state);
+  const result=this.accountPreferences.apply(settings.environment,state);this.accountSnapshot=result;return result;
  }
- async selectAccount(body){const settings=this.requireRemoteAccounts();if(this.accountPreferences.disabled(settings.environment,body.accountId))throw new ToolkitError('Account is disabled. Enable it before switching.');const state=await this.accounts.select(settings,body,()=>this.settings.accounts===settings&&settings.enabled&&!this.accountPreferences.disabled(settings.environment,body.accountId));return this.accountPreferences.apply(settings.environment,state);}
+ async selectAccount(body){
+  if(this.accounts.switching)throw new ToolkitError('An account switch is in progress. Refresh shortly.');
+  const settings=this.requireRemoteAccounts();
+  if(this.accountPreferences.disabled(settings.environment,body.accountId))throw new ToolkitError('Account is disabled. Enable it before switching.');
+  return this.accountOperation(settings,()=>this.accounts.select(settings,body,()=>this.settings.accounts===settings&&settings.enabled&&!this.accountPreferences.disabled(settings.environment,body.accountId)));
+ }
  requireGpu(){if(this.runtime.platform==='darwin')throw new ToolkitError('GPU services are unavailable on macOS.');if(!this.settings.gpu.enabled)throw new ToolkitError('GPU module is disabled.');}
  async openGpu(){this.requireGpu();return this.gpu.open();}
  async close(){if(this.loading)await this.loading.catch(()=>{});if(this.downloads)await this.downloads.close();}

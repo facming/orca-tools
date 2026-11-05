@@ -22,7 +22,7 @@ async function startServer(options){
     return send(200,html.replaceAll('__TOKEN__',token),'text/html; charset=utf-8');
    }
    if(req.headers['x-toolkit-token']!==token&&req.headers['x-download-token']!==token)return send(403,{error:'Session changed. Reload this page.'});
-   if(req.method==='GET'&&req.url==='/api/accounts')return send(200,await controller.accountState());
+   if(req.method==='GET'&&req.url==='/api/accounts')return send(200,await controller.readAccounts());
    if(req.method==='GET'&&req.url==='/api/status')return send(200,await controller.status());
    if(req.method==='GET'&&['/api/gpu/native','/api/gpu/workflows'].includes(req.url)){
     controller.requireGpu();
