@@ -2,11 +2,13 @@
 <h2>Project workbench</h2>
 <p>Choose a locally approved project. Project scripts run with your user permissions. Review the project and task before authorizing execution.</p>
 <button id="wb-refresh" type="button">Discover projects and tasks</button>
+<button id="wb-engine-pick" type="button">Select Blender / Godot application</button><pre id="wb-engine-info"></pre>
 <p id="wb-message" role="status">Refresh to discover approved projects. Approve new roots in the local Bridge configuration during setup.</p>
 <div class="grid"><fieldset><legend>Project files</legend>
 <label>Engine <select id="wb-engine"><option value="blender">Blender</option><option value="godot">Godot</option><option value="unity">Unity</option></select></label>
 <label>Project <select id="wb-project"></select></label>
 <button id="wb-files" type="button">Browse files</button><button id="wb-download" type="button">Download into this project</button>
+<button id="wb-resource-pick" type="button">Copy downloaded asset into project</button>
 <p id="wb-directory"></p><button id="wb-parent" type="button">Parent folder</button><div id="wb-entries"></div>
 <label>Selected file <input id="wb-file" readonly></label><button id="wb-edit" type="button">Edit in TextEdit</button><pre id="wb-preview"></pre>
 </fieldset><fieldset><legend>Native task</legend>
@@ -22,6 +24,7 @@
 <form id="wb-workflow-form"><label>Workflow <select id="wb-workflow"></select></label><pre id="wb-workflow-info"></pre>
 <div id="wb-parameter-fields"></div><details><summary>Advanced parameters (JSON)</summary><label>Additional parameters <textarea id="wb-parameters" rows="3" cols="35">{}</textarea></label></details><button id="wb-workflow-run" type="submit">Run workflow</button></form>
 <label>Import approved API workflow JSON <input id="wb-import-file" type="file" accept=".json,application/json"></label><button id="wb-import" type="button">Import as new workflow</button>
+<button id="wb-update" type="button">Update selected workflow from JSON</button><button id="wb-delete" type="button">Delete selected workflow</button><button id="wb-versions" type="button">Show versions</button><label>Workflow ID (also for deleted workflows) <input id="wb-history-id"></label><label>Saved revision <select id="wb-revision"></select></label><button id="wb-restore" type="button">Restore selected revision</button>
 </fieldset>
-<fieldset><legend>Tasks and results</legend><button id="wb-jobs-refresh" type="button">Refresh tasks</button><div id="wb-jobs"></div><pre id="wb-result" role="status"></pre></fieldset>
+<fieldset><legend>Tasks and results</legend><button id="wb-jobs-refresh" type="button">Refresh tasks</button><div id="wb-jobs"></div><div id="wb-artifacts"></div><pre id="wb-result" role="status"></pre></fieldset>
 </section>

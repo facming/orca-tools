@@ -10,6 +10,11 @@ using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using UnityEditor;
 using UnityEditor.SceneManagement;
+#if UNITY_6000_5_OR_NEWER
+using ObjectId = System.String;
+#else
+using ObjectId = System.Int32;
+#endif
 
 [InitializeOnLoad]
 public static class OrcaUnityBridge
@@ -17,12 +22,12 @@ public static class OrcaUnityBridge
     [Serializable] public class Request {
         public string operation, session, id_request, name, component, property, path;
         public bool authorized;
-        public int id;
+        public ObjectId id;
         public float value;
         public float[] position, rotation, scale;
     }
     [Serializable] public class Row {
-        public int id, parent;
+        public ObjectId id, parent;
         public string name, path, type, text;
         public float[] position, rotation, scale;
     }
@@ -38,7 +43,8 @@ public static class OrcaUnityBridge
     }
     [Serializable] public class Health {
         public string session, project, version, pipeline;
-        public int pid;
+        public int pid, protocol;
+        public string object_ids;
         public double timestamp;
         public bool metal, compatible;
     }
@@ -79,8 +85,16 @@ public static class OrcaUnityBridge
         var type = pipeline == null ? "BuiltIn" : pipeline.GetType().FullName;
         bool known = type == "BuiltIn" || type == "UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset" ||
             type == "UnityEngine.Rendering.HighDefinition.HDRenderPipelineAsset";
+#if UNITY_6000_5_OR_NEWER
+        known = type == "BuiltIn";
+#endif
         return new Health {session=secret, project=project, version=Application.unityVersion,
-            pid=System.Diagnostics.Process.GetCurrentProcess().Id,
+            pid=System.Diagnostics.Process.GetCurrentProcess().Id, protocol=2,
+#if UNITY_6000_5_OR_NEWER
+            object_ids="uint64-string",
+#else
+            object_ids="int32",
+#endif
             timestamp=DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()/1000.0,
             metal=SystemInfo.graphicsDeviceType == GraphicsDeviceType.Metal, pipeline=type,
             compatible=known && (PlayerSettings.GetUseDefaultGraphicsAPIs(BuildTarget.StandaloneOSX) ||
@@ -128,8 +142,19 @@ public static class OrcaUnityBridge
         WriteNew(tmp, JsonUtility.ToJson(new Response {session=secret, id_request=r.id_request, result=result, ok=ok, unsupported=unsupported}));
         File.Move(tmp, FileFor(r.id_request, ".response.json"));
     }
-    static GameObject ObjectFor(int id) {
+    static ObjectId IdFor(GameObject go) {
+#if UNITY_6000_5_OR_NEWER
+        return go == null ? "0" : EntityId.ToULong(go.GetEntityId()).ToString(System.Globalization.CultureInfo.InvariantCulture);
+#else
+        return go == null ? 0 : go.GetInstanceID();
+#endif
+    }
+    static GameObject ObjectFor(ObjectId id) {
+#if UNITY_6000_5_OR_NEWER
+        var go = EditorUtility.EntityIdToObject(EntityId.FromULong(UInt64.Parse(id, System.Globalization.CultureInfo.InvariantCulture))) as GameObject;
+#else
         var go = EditorUtility.InstanceIDToObject(id) as GameObject;
+#endif
         if (go == null || EditorUtility.IsPersistent(go) || !go.scene.IsValid() || !go.scene.isLoaded ||
             (go.hideFlags & HideFlags.DontSave) != 0) throw new InvalidOperationException();
         return go;
@@ -140,7 +165,7 @@ public static class OrcaUnityBridge
         return new Vector3(v[0], v[1], v[2]);
     }
     static Row Describe(GameObject go) {
-        return new Row {id=go.GetInstanceID(), name=go.name, parent=go.transform.parent == null ? 0 : go.transform.parent.gameObject.GetInstanceID(),
+        return new Row {id=IdFor(go), name=go.name, parent=IdFor(go.transform.parent == null ? null : go.transform.parent.gameObject),
             position=Vector(go.transform.localPosition), rotation=Vector(go.transform.localEulerAngles), scale=Vector(go.transform.localScale)};
     }
     static IEnumerable<GameObject> Objects() {

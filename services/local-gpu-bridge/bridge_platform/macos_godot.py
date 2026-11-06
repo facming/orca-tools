@@ -257,6 +257,7 @@ class GodotControl:
                                capture_output=True, text=True, timeout=5, check=True, shell=False)
         if not all(flag in help_result.stdout for flag in ('Godot', '--editor', '--import', '--headless', '--recovery-mode')):
             raise Unsupported('Godot editor with headless import and recovery mode is required.')
+        self.detected_version = version
         return p
 
     def status(self, api_healthy=True):

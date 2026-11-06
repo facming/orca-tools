@@ -94,8 +94,9 @@ class BlenderControl(GodotControl):
         exe = executable(self.settings['blender_executable'])
         value = self.run([str(exe), '--version'], cwd=self.root, env=child_env(self.root), stdin=subprocess.DEVNULL,
                          capture_output=True, text=True, timeout=5, check=True, shell=False)
-        if not re.search(r'^Blender (?:4\.[2-9]|4\.[1-9][0-9]+|5\.[0-9]+)\.[0-9]+[ \t]*$', value.stdout.splitlines()[0] if value.stdout else ''):
+        if not re.search(r'^Blender (?:4\.[2-9]|4\.[1-9][0-9]+|5\.[0-9]+)\.[0-9]+(?: LTS)?[ \t]*$', value.stdout.splitlines()[0] if value.stdout else ''):
             raise Unsupported('unsupported: stable Blender 4.2+ within major 4 or 5 is required.')
+        self.detected_version = value.stdout.splitlines()[0]
         return exe
 
     def status(self, api_healthy=True):

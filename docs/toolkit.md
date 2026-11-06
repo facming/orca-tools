@@ -61,3 +61,5 @@ Toolkit设置不保存token、SSH私钥或OAuth。浏览器管理API仅回环监
 macOS 新入口为 Orca 的 Help → Orca Toolkit：账户、下载、GPU/原生引擎状态、设置。普通插件命令会明确指向 Host 菜单。Windows 保留原有管理界面。
 
 [完整功能清单、验证范围和剩余风险](toolkit-host-7b11.md)：账户/下载/远程浏览已接入 Host；macOS 原生引擎项目编辑和任务操作仍走既有 MCP，尚未与 Windows 项目 UI 完全一致。安装延后，RELEASE BLOCKED 保留。
+
+7B-13: [macOS 功能清单、真实编译/启动证据及剩余风险](toolkit-host-7b13.md)。Unity 6000.5.4f1 已通过真实 API 编译，完整运行验收被许可阻塞；RELEASE BLOCKED。

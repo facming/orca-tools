@@ -184,3 +184,9 @@ def service():
 
 bpy.app.timers.register(service,first_interval=0.2,persistent=True)
 (spool/'ready.json').write_text(json.dumps({'ready':True}),encoding='utf-8')
+
+if bpy.app.background:
+    import time
+    while True:
+        service()
+        time.sleep(0.1)
