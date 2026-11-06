@@ -198,16 +198,13 @@ test('macOS activation shares one runtime, serves local previews and cannot star
   assert.equal(service.controller.gpu.runtime, r);
   assert.equal(commands.size, 6);
   assert.equal(typeof commands.get('toolkit.configuration'), 'function');
-  assert.throws(()=>commands.get('toolkit.configuration')({operation:'status'}),/Host menu/);
+  assert.throws(()=>commands.get('toolkit.configuration')({operation:'status'}));
   const {url} = service;
   assert.equal(new URL(url).hostname, '127.0.0.1');
-  for (const name of ['accounts', 'downloads']) {
-    await commands.get('toolkit.' + name)({});
-    assert.equal(launched.at(-1), url + '#' + name);
-    assert.equal((await fetch(url + name + '/')).status, 200);
+  for (const name of ['open', 'accounts', 'downloads', 'gpu', 'pause-downloads']) {
+    await assert.rejects(commands.get('toolkit.' + name)({}));
   }
-  await commands.get('toolkit.gpu')({});
-  assert.equal(launched.at(-1), url + '#workflows');
+  assert.deepEqual(launched, []);
   const html = await (await fetch(url)).text();
   const headers = {'X-Toolkit-Token': html.match(/const token='([a-f0-9]+)'/)[1], Origin: new URL(url).origin, 'Content-Type': 'application/json'};
   const state = await (await fetch(url + 'api/status', {headers})).json();

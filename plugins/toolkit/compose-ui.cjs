@@ -11,6 +11,7 @@ function fragment(file){
 function compose(initial='overview',platform='win32'){
  let shell=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('__SHELL_STYLE__',fs.readFileSync(path.join(__dirname,'theme.css'),'utf8'));
  shell=shell.replace('__CONFIGURATION_PANEL__',platform==='darwin'?fs.readFileSync(path.join(__dirname,'configuration-panel.html'),'utf8'):'');
+ if(platform==='darwin')shell=shell.replace('<main>', '<main><p role="status">macOS: use Help → Orca Toolkit in the Orca app for Accounts, Downloads, GPU &amp; native tools, and Settings. The Host menu authorizes these operations.</p>');
  const skin=fs.readFileSync(path.join(__dirname,'module-theme.css'),'utf8');
  const definitions=[['accounts','accounts.html','/api/','/api/'],['downloads','modules/downloads/index.html','/api/','/api/downloads/'],['gpu',platform==='darwin'?'modules/gpu-macos-panel.html':'modules/gpu-panel.html','/api/','/api/gpu/']];
  const scripts=definitions.map(([name,file,from,to])=>{

@@ -1,0 +1,97 @@
+7B-11 evidence — 2026-11-06 Asia/Shanghai — RELEASE BLOCKED
+Baselines: Orca 88e8a5f4055493616807918c10a52aa90a8085c7
+           Toolkit 61511d7c40f81c8b9aa923eede7f9b4b8af69d55
+
+PRODUCT / SHARED REGRESSION
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+108 tests: 107 PASS / 1 existing Windows-only skip / 0 failures.
+Includes Host accounts passive reads, verified switching, disabled preferences,
+settings-change preflight rejection and retry after disconnection; original Windows
+controller, account HTTP, GPU startup, downloads, directory picker and remote browser.
+Final UI adjustment rerun: test-configuration-host + test-unified-ui, 11/11 PASS.
+
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+301 tests: 298 PASS / 3 existing platform skips. ComfyUI, Blender, Godot, Unity,
+MCP schemas, native tasks, artifacts, privacy and failure recovery. Mock engines;
+no real engine process, project or hardware acceptance. Expected malformed-workflow
+tracebacks are negative-test output.
+python3 -m unittest discover -s plugins/toolkit/modules/downloads -p 'test_*.py'
+13/13 PASS: ranges, bounds, scoped cleanup, changed-source and command rejection.
+python3 -m unittest discover -s tools/account-switcher -p 'test_*.py'
+Live loopback account panel checks PASS (script has no unittest test cases).
+python3 -m unittest discover -s scripts -p 'test_*.py'
+8 tests: 5 PASS / 3 platform skips. No production installation.
+
+RECOVERY / SECURITY BOUNDARY
+node scripts/test-host-recovery.cjs /tmp/orca-7b11-authority.cjs
+9/9 PASS: real files/SQLite/Ed25519; synthetic identity and range/registration RPC.
+Lost create/revoke/release responses, restart, forged metadata/receipt/completion,
+concurrent claims, stale-owner denial and verified offline cleanup all retained.
+TOOLKIT_SOCKETPAIR_SOURCE=/Users/apple/Documents/ChatGPT/orca/native/toolkit-host/socketpair.c
+TOOLKIT_AUTHORITY_BUNDLE=/tmp/orca-7b11-authority.cjs
+python3 -m unittest discover -s plugins/toolkit/config-service -p 'test_*.py'
+25/25 PASS: real native socketpair/FD3/SCM_RIGHTS/Security.framework and SQLite;
+ad-hoc synthetic identities, not installed packaged Host/service admission.
+PYTHONPATH=plugins/toolkit/config-service python3 -m unittest discover \
+  -s services/download-authorization -p 'test_authority.py'
+5/5 PASS.
+docker run --rm --network none -v /Users/apple/Documents/ChatGPT/orca-tools:/src:ro \
+  orca-security-test:7b3 python3 services/download-authorization/test_isolation.py
+PASS actual Linux cross-UID files/SQLite, dedicated sshd, forced commands/ranges,
+host pin denial, live read drain, concurrent register/revoke, durable tombstones,
+restart and offline corruption recovery. Disposable container; no production VPS.
+
+RENDERED UI
+ORCA_BACKGROUND_LAUNCH=1 node scripts/test-host-electron.cjs ../orca \
+ /tmp/orca-7b11-final/toolkit-host /tmp/orca-7b11-window.cjs /tmp/orca-7b11-authority.cjs
+PASS actual hidden Electron, production window/preload/staged resources, 1000x900.
+Temporary profile/home/SQLite. Native dialog answers, accounts, remote listings,
+GPU health and external-browser open are injected: no real service/account access.
+Checks preview/import Cancel/Allow, edit/backup/restore, account switch, four engine
+states, fixed ComfyUI URL, strict tools schema, remote browsing, folder memory and
+cancellation, orphan recovery and target guards, owner redaction, second-WebContents
+rejection for both downloads and tools. Window visibility remains false.
+Screenshot /tmp/toolkit-host-electron-7b11.png; visually reviewed.
+ORCA_BACKGROUND_LAUNCH=1 node scripts/test-host-download-ui.cjs ../orca \
+ /tmp/orca-7b11-final/toolkit-host
+PASS production staged UI in headless Chromium, 1000x900, synthetic tasks:
+bytes/speed/ETA, pause/resume/pause-all/cancel, cleanup warning and retry, checksum
+state, disconnected Host disabling create, restored connection, new ID after success.
+Screenshot /tmp/toolkit-downloads-7b11.png; visually reviewed.
+Required electron skill is absent from available local catalogs; these custom
+Playwright checks are supplemental evidence, not that skill's certification.
+
+ORCA / BUILD
+ORCA_BACKGROUND_LAUNCH=1 pnpm test src/main/toolkit \
+ src/main/menu/register-app-menu.test.ts \
+ src/main/plugins/workers/plugin-worker-supervision.integration.test.ts --maxWorkers=2
+62 PASS / 1 existing platform skip, 6 files.
+ORCA_BACKGROUND_LAUNCH=1 pnpm check:changed \
+ --base=baseline/installed-1.4.249 --maxWorkers=2
+Implementation checkpoint: 41/41 checks PASS (typechecks, lint, formatting,
+import boundaries, quality/ratchets and affected tests). Final staged gate is run
+again immediately before push; PR records its final result. No --no-verify.
+ORCA_ELECTRON_VITE_TARGET=main ORCA_BACKGROUND_LAUNCH=1 \
+ node_modules/.bin/electron-vite build --config config/electron-vite-target.config.cts
+PASS full main target build; existing dynamic-import warnings only.
+Pinned Node 24.22.1 stage.mjs + seal.mjs - --test-only: PASS.
+ORCA_BACKGROUND_LAUNCH=1 node native/toolkit-host/smoke-worker.mjs /tmp/orca-7b11-final
+PASS actual separate worker process/IPC, no RUN_AS_NODE/private API discovery.
+python3 scripts/check.py and git diff --check: PASS.
+
+INITIAL FAILURES RESOLVED
+- Old command tests assumed macOS browser dispatch and matched old copy; changed
+  to require denial and no browser launch, retaining HTTP/native denial coverage.
+- Reused account markup initialization used a shadowed document binding; fixed
+  to window.document. GPU init had an accidentally inserted download handler;
+  removed. Both failures reproduced in actual hidden Electron, then passed.
+- Extracted native menu to satisfy existing size gate; added required braces.
+- Test harness fake DOM lacked querySelector; navigation uses its actual ID.
+- Main build first invoked from Toolkit cwd failed config resolution; rerun from
+  the Orca root passed. No installed app/build was launched.
+
+LIMITS
+No full installable app, local enrollment, production migration, real accounts,
+production VPS, Windows hardware, Metal/C# or x64/Rosetta acceptance. macOS native
+project/task GUI remains less complete than Windows; MCP adapters remain available.
+Existing lease/proof safety remains conservative. RELEASE BLOCKED.

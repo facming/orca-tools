@@ -10,7 +10,7 @@ module.exports={create({runtime,request,dataDir}){
   async browse(environment,options){
    const directory=options.directory??(await preferences.remoteLocation(dataDir,environment)).directory;
    const result=await browser.list(environment,{...options,directory});
-   await preferences.rememberRemote(dataDir,environment,{directory:result.directory});return result;
+   try{await preferences.rememberRemote(dataDir,environment,{directory:result.directory});}catch{return {...result,warning:'Files loaded; directory memory could not be saved. Browse again to retry.'};}return result;
   },
   async remember(environment,{folder,source}){
    if(folder)await preferences.rememberFolder(dataDir,folder);

@@ -1,3 +1,4 @@
+<h1>Orca Toolkit</h1><nav id="host-navigation" aria-label="Toolkit"><a href="#host-downloads">Downloads</a><a href="#host-accounts">Accounts</a><a href="#host-gpu">GPU &amp; native tools</a><a href="#configuration-maintenance">Settings</a></nav>
 <section id="configuration-maintenance" aria-label="Configuration maintenance">
 <h2>Configuration service</h2>
 <p>Preview both legacy documents before confirming migration. Existing JSON files remain unchanged. Backups stay in the isolated configuration service.</p>
@@ -10,39 +11,57 @@
 <div class="actions"><button id="config-status" class="button" type="button">Check service</button><button id="config-reload" class="button" type="button">Reload settings</button><button id="config-preview" class="button" type="button">Preview migration</button><button id="config-confirm" class="button" type="button" disabled>Confirm this migration</button><button id="config-backup" class="button" type="button">Create backup</button></div>
 <label>Backup ID <input id="config-backup-id" placeholder="backup-…sqlite" autocomplete="off"></label>
 <div class="actions"><button id="config-restore" class="button" type="button" disabled>Restore backup…</button><button id="config-retry" class="button" type="button" disabled>Retry last request</button></div>
-<pre id="config-result" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:28rem;overflow:auto"></pre>
+<p id="config-message" role="status"></p><details><summary>Request details</summary><pre id="config-result" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:28rem;overflow:auto"></pre></details>
 </section>
-<section aria-label="Host downloads">
+<section id="host-downloads" aria-label="Host downloads">
 <h2>Downloads</h2>
 <p>Downloads use the remote endpoint configured above. Paused and unresolved tasks retain access until verified cleanup.</p>
 <form id="host-download-form"><label>Remote file <input id="host-download-source" required placeholder="/project/file"></label>
 <button id="host-download-remote" type="button">Browse remote files…</button>
 <label>Local folder <input id="host-download-folder" required></label><button id="host-download-browse" type="button">Choose folder…</button>
 <label>Connections <input id="host-download-concurrency" type="number" min="1" max="16" value="12" required></label>
-<button id="host-download-create" type="submit">Download</button><button id="host-download-refresh" type="button">Refresh tasks</button><button id="host-download-reconcile" type="button">Retry recovery</button></form>
+<button id="host-download-create" type="submit">Download</button><button id="host-download-refresh" type="button">Refresh tasks</button><button id="host-download-pause-all" type="button">Pause all</button><button id="host-download-reconcile" type="button">Retry recovery</button></form>
 <fieldset id="host-download-browser" hidden><legend>Remote files</legend>
 <label>Directory <input id="host-download-directory"></label><button id="host-download-go" type="button">Go</button><button id="host-download-roots" type="button">Projects</button><button id="host-download-up" type="button">Parent</button>
 <label>Filter <input id="host-download-query"></label><label><input id="host-download-hidden" type="checkbox">Show hidden files</label>
-<div id="host-download-entries"></div><button id="host-download-more" type="button">Next page</button><button id="host-download-close" type="button">Close browser</button></fieldset>
+<div id="host-download-entries"></div><button id="host-download-previous" type="button">Previous page</button><button id="host-download-more" type="button">Next page</button><button id="host-download-close" type="button">Close browser</button></fieldset>
 <p id="host-download-error" role="status"></p><div id="host-download-jobs"></div><pre id="host-download-recovery"></pre>
 </section>
+<section id="host-accounts" aria-label="Host accounts"><!-- HOST_ACCOUNTS --></section>
+<section id="host-gpu" aria-label="GPU and native tools"><h2>GPU &amp; native tools</h2><p>Check ComfyUI, Blender, Godot and Unity below. The local manager starts and stops ComfyUI. Native engine actions use the existing GPU MCP tools and locally approved projects; this window does not edit native project permissions.</p><button id="host-gpu-open" type="button">Open ComfyUI manager</button><button id="host-gpu-refresh" type="button">Refresh status and workflows</button><p id="host-gpu-status" role="status">Refresh to check installed engines.</p><pre id="host-gpu-workflows"></pre></section>
 <script nonce="__TOKEN__">
+document.getElementById('host-navigation').onclick=event=>{const link=event.target.closest('a');if(link){event.preventDefault();document.getElementById(link.hash.slice(1))?.scrollIntoView();}};
+/* HOST_ACCOUNTS_SCRIPT */
+(()=>{
+ const api=window.orcaToolkitTools,$=id=>document.getElementById('host-gpu-'+id);let busy=false;
+ async function perform(open=false){if(busy)return;busy=true;$('open').disabled=true;$('refresh').disabled=true;$('status').textContent='Checking local Bridge…';$('workflows').textContent='';try{
+ if(!api)throw Error('Open Help → Orca Toolkit → GPU & native tools.');
+ if(open){await api.call({operation:'gpu-open'});$('status').textContent='Opened local Bridge manager. Refresh to check engine status.';return;}
+ const state=await api.call({operation:'gpu-status'});$('status').textContent=['comfyui','blender','godot','unity'].map(name=>name+': '+(state[name]?.state||'unavailable')).join(' · ');
+ const catalog=await api.call({operation:'gpu-workflows'});$('workflows').textContent=(catalog.workflows||[]).map(w=>(w.name||w.id)+' · '+(w.available?'Available':'Unavailable')).join('\n')||'No workflows reported.';
+ }catch(e){$('workflows').textContent=e.message;}finally{busy=false;$('open').disabled=false;$('refresh').disabled=false;}}
+ $('open').onclick=()=>perform(true);$('refresh').onclick=()=>perform();
+ window.addEventListener('toolkit-configuration-reload',()=>{$('status').textContent='Settings changed. Refresh to check engine status.';$('workflows').textContent='';});
+})();
 (()=>{
  const $=id=>document.getElementById('host-download-'+id),api=window.orcaToolkitDownloads;
- let pending=false,lastCreate=null,initialized=false,enabled=false,listing=null,polling=false;
- const controls=()=>{for(const id of ['create','browse','refresh','reconcile','remote','go','roots','up','more'])$(id).disabled=pending||!api||(id==='create'&&!enabled)||(id==='more'&&!listing?.hasMore)||(id==='up'&&!listing?.parent);for(const button of $('jobs').querySelectorAll('button'))button.disabled=pending||button.dataset.blocked==='true';for(const button of $('entries').querySelectorAll('button'))button.disabled=pending||button.dataset.blocked==='true';};
+ let pending=false,lastCreate=null,initialized=false,enabled=false,listing=null,polling=false,pollError=false;
+ const bytes=value=>{const n=Math.max(0,Number(value)||0),units=['B','KiB','MiB','GiB','TiB'],i=Math.max(0,Math.min(4,Math.floor(Math.log2(n||1)/10)));return (n/1024**i).toFixed(i?1:0)+' '+units[i];};
+ const remaining=job=>{if(job.status==='complete')return job.verified?'Checksum verified':'Verification unavailable';if(job.status==='verifying')return 'Verifying checksum…';if(job.status==='preparing')return 'Preparing remote access…';if(job.status!=='downloading')return 'Transfer stopped';if(!(job.speed>0))return 'Estimating remaining time…';const seconds=Math.ceil(Math.max(0,job.size-job.bytes)/job.speed);return seconds<60?seconds+'s remaining':Math.ceil(seconds/60)+'m remaining';};
+ const controls=()=>{for(const id of ['create','browse','refresh','reconcile','remote','go','roots','up','more','previous','pause-all'])$(id).disabled=pending||!api||(id==='create'&&!enabled)||(id==='more'&&!listing?.hasMore)||(id==='previous'&&!listing?.offset)||(id==='up'&&!listing?.parent);for(const button of $('jobs').querySelectorAll('button'))button.disabled=pending||button.dataset.blocked==='true';for(const button of $('entries').querySelectorAll('button'))button.disabled=pending||button.dataset.blocked==='true';};
  async function invoke(request){if(!api)throw Error('Open downloads from the Orca Host maintenance menu.');return api.call(request);}
- async function refresh(){const state=await invoke({operation:'list'});enabled=state.enabled;
+ async function refresh(){const state=await invoke({operation:'list'});enabled=state.enabled;if(pollError){$('error').textContent='Connection restored.';pollError=false;}
   if(!initialized){if(!$('folder').value)$('folder').value=state.defaultFolder||'';if(!$('source').value)$('source').value=state.remoteLocation?.source||'';$('directory').value=state.remoteLocation?.directory||'';initialized=true;}
   $('jobs').replaceChildren();$('recovery').textContent=state.recovery.filter(r=>r.reason).map(r=>r.id+': '+r.reason).join('\n');
-  for(const job of state.jobs){const row=document.createElement('fieldset'),title=document.createElement('legend'),info=document.createElement('p');title.textContent=job.name;info.textContent=job.status+' · '+job.percent.toFixed(1)+'% · '+job.bytes+' / '+job.size+' bytes · '+Math.round(job.speed)+' B/s · '+job.retries+' retries';row.append(title,info);
+  if(!state.jobs.length)$('jobs').textContent='No saved downloads. Choose a remote file to start.';
+  for(const job of state.jobs){const row=document.createElement('fieldset'),title=document.createElement('legend'),info=document.createElement('p');title.textContent=job.name;info.textContent=job.status+' · '+job.percent.toFixed(1)+'% · '+bytes(job.bytes)+' / '+bytes(job.size)+' · '+bytes(job.speed)+'/s · '+remaining(job)+' · '+job.retries+' retries';row.append(title,info);
    const progress=document.createElement('progress');progress.max=100;progress.value=job.percent;progress.setAttribute('aria-label',job.name+' progress');row.append(progress);
    const detail=document.createElement('p');detail.textContent=[job.destination,job.error,job.cleanupWarning,job.status==='paused'?'Resume explicitly after checking the remote connection.':null].filter(Boolean).join(' — ');row.append(detail);
-   const actions=['preparing','downloading','verifying'].includes(job.status)?['pause']:['paused','error'].includes(job.status)?['resume','cancel','cleanup']:['complete','cancelled'].includes(job.status)?['cleanup']:['cancel','cleanup'];
-   for(const action of [...actions,'open-folder']){const button=document.createElement('button');button.type='button';button.textContent=({pause:'Pause',resume:'Resume',cancel:'Cancel',cleanup:'Clear access','open-folder':'Open folder'})[action];button.dataset.blocked=String(!!job.recoveryError&&action!=='open-folder');button.onclick=()=>perform(action==='open-folder'?{operation:action,id:job.id}:{operation:'action',id:job.id,action});row.append(button);}$('jobs').append(row);
+   const actions=['preparing','downloading','verifying'].includes(job.status)?['pause','cancel']:['paused','error'].includes(job.status)?['resume','cancel','cleanup']:['complete','cancelled'].includes(job.status)?['cleanup']:['cancel','cleanup'];
+   for(const action of [...actions,'open-folder']){const button=document.createElement('button');button.type='button';button.textContent=({pause:'Pause',resume:'Resume',cancel:'Cancel',cleanup:'Clear access','open-folder':'Open folder'})[action];button.dataset.blocked=String(!!job.recoveryError&&action!=='open-folder');button.onclick=()=>{if(['cancel','cleanup'].includes(action)&&!['complete','cancelled'].includes(job.status)&&!window.confirm('Cancel this download and remove its partial file? Temporary access is removed only after verified revocation.'))return;perform(action==='open-folder'?{operation:action,id:job.id}:{operation:'action',id:job.id,action});};row.append(button);}$('jobs').append(row);
   }controls();
  }
- async function perform(request,accept){if(pending)return;pending=true;controls();$('error').textContent='Working…';try{const result=await invoke(request);await accept?.(result);await refresh();$('error').textContent=result?.warning||'';window.dispatchEvent(new Event('toolkit-download-change'));}catch(e){$('error').textContent=e.message;try{await refresh();}catch{}window.dispatchEvent(new Event('toolkit-download-change'));}finally{pending=false;controls();}}
+ async function perform(request,accept){if(pending)return;pending=true;controls();$('error').textContent='Working…';try{const result=await invoke(request);await accept?.(result);if(request.operation==='create')lastCreate=null;await refresh();$('error').textContent=result?.warning||'';window.dispatchEvent(new Event('toolkit-download-change'));}catch(e){$('error').textContent=e.message;try{await refresh();}catch{}window.dispatchEvent(new Event('toolkit-download-change'));}finally{pending=false;controls();}}
  function browse(directory,offset=0){return perform({operation:'browse-remote',directory,offset,query:$('query').value,showHidden:$('hidden').checked},result=>{
   listing=result;$('browser').hidden=false;$('directory').value=result.directory;$('entries').replaceChildren();
   if(!result.entries.length)$('entries').textContent='No matching files.';
@@ -50,17 +69,18 @@
  });}
  $('form').onsubmit=e=>{e.preventDefault();const input={operation:'create',source:$('source').value.trim(),folder:$('folder').value.trim(),concurrency:Number($('concurrency').value)};const key=JSON.stringify(input);if(lastCreate?.key!==key)lastCreate={key,requestId:crypto.randomUUID()};perform({...input,requestId:lastCreate.requestId});};
  $('browse').onclick=()=>perform({operation:'choose-folder'},result=>{if(result.path)$('folder').value=result.path;});
+ $('query').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();browse($('directory').value);}};$('hidden').onchange=()=>browse($('directory').value);$('previous').onclick=()=>browse(listing.directory,Math.max(0,listing.offset-200));
  $('remote').onclick=()=>browse($('directory').value);$('go').onclick=()=>browse($('directory').value);$('roots').onclick=()=>browse('');$('up').onclick=()=>browse(listing.parent);$('more').onclick=()=>browse(listing.directory,listing.offset+200);$('close').onclick=()=>{$('browser').hidden=true;};
- $('refresh').onclick=()=>perform({operation:'list'});$('reconcile').onclick=()=>perform({operation:'reconcile'});
- window.addEventListener('toolkit-configuration-reload',()=>{initialized=false;listing=null;$('browser').hidden=true;});
+ $('pause-all').onclick=()=>perform({operation:'pause-all'});$('refresh').onclick=()=>perform({operation:'list'});$('reconcile').onclick=()=>perform({operation:'reconcile'});
+ window.addEventListener('toolkit-configuration-reload',()=>{initialized=false;listing=null;lastCreate=null;$('source').value='';$('directory').value='';$('browser').hidden=true;});
  controls();if(!api)$('error').textContent='Downloads require the Orca Host maintenance menu.';
- if(api)setInterval(async()=>{if(pending||polling)return;polling=true;try{await refresh();}catch(e){$('error').textContent=e.message;}finally{polling=false;}},2000);
+ async function poll(){if(pending||polling)return;polling=true;try{await refresh();}catch(e){enabled=false;pollError=true;$('error').textContent=e.message+' — Refresh tasks or retry recovery.';controls();}finally{polling=false;}}if(api){poll();setInterval(poll,2000);}
 })();
 (()=>{
 const $=id=>document.getElementById(id),buttons=['status','reload','preview','confirm','backup','restore','retry','save'];
 let preview=null,last=null,busy=false,unavailable=!window.orcaToolkitConfiguration,status=null,snapshot=null,original=null;
 const fields=[['accounts','enabled',true],['accounts','environment',''],['accounts','worktree',''],['downloads','enabled',true],['downloads','environment',''],['downloads','sshHost',''],['downloads','sshUser',''],['downloads','sshPort',22],['gpu','enabled',true]];
-for(const [section,key,defaultValue] of fields){const label=document.createElement('label'),input=document.createElement('input');label.textContent=section+' / '+key+' ';input.id='setting-'+section+'-'+key;input.type=typeof defaultValue==='boolean'?'checkbox':typeof defaultValue==='number'?'number':'text';label.append(input);$('config-fields').append(label,document.createElement('br'));}
+for(const [section,key,defaultValue] of fields){const label=document.createElement('label'),input=document.createElement('input');label.textContent=({'accounts.enabled':'Enable remote accounts','accounts.environment':'Accounts connection','accounts.worktree':'Account worktree (optional)','downloads.enabled':'Enable downloads','downloads.environment':'Download connection','downloads.sshHost':'Download server address','downloads.sshUser':'Download SSH user','downloads.sshPort':'Download SSH port','gpu.enabled':'Enable GPU and native tools'})[section+'.'+key]+' ';input.id='setting-'+section+'-'+key;input.type=typeof defaultValue==='boolean'?'checkbox':typeof defaultValue==='number'?'number':'text';label.append(input);$('config-fields').append(label,document.createElement('br'));}
 const render=()=>{
  const caps=status?.maintenance;
  for(const name of buttons)$('config-'+name).disabled=busy||unavailable||(name==='confirm'&&(!preview||!caps?.confirm))||(name==='restore'&&!caps?.restore)||(name==='preview'&&!status)||(name==='backup'&&status?.state!=='ready')||(name==='save'&&!snapshot)||(name==='retry'&&(!last?.request_id||(['confirm','restore'].includes(last.operation)&&!caps?.targetChange)));
@@ -78,12 +98,12 @@ async function refresh(){
 }
 async function execute(input,retry=false){if(busy)return;busy=true;render();try{
  if(!retry){last={...input};if(['preview','confirm','restore','patch'].includes(input.operation))last.request_id=crypto.randomUUID();}
- const result=await call(last);$('config-result').textContent=JSON.stringify({operation:last.operation,result},null,2);
+ const result=await call(last);$('config-message').textContent=({status:'Configuration checked.',patch:'Settings saved.',preview:'Preview ready. Review the request details before confirming.',confirm:'Configuration imported.',backup:'Backup created.',restore:'Backup restored.'})[last.operation]||'Request completed.';$('config-result').textContent=JSON.stringify({operation:last.operation,result},null,2);
  if(last.operation==='preview')preview={...result,store_id:status.store_id,epoch:status.epoch};
  if(last.operation==='backup')$('config-backup-id').value=result.backup_id;
  if(['confirm','restore','patch'].includes(last.operation)){preview=null;await refresh();window.dispatchEvent(new Event('toolkit-configuration-reload'));}
  if(last.operation==='status')await refresh();
-}catch(e){$('config-result').textContent=e.message;}finally{busy=false;render();}}
+}catch(e){$('config-message').textContent=e.message;$('config-result').textContent=e.message;}finally{busy=false;render();}}
 async function source(kind){const file=$('config-'+kind+'-file').files[0],defaults=$('config-'+kind+'-defaults').checked;if(defaults&&file)throw Error('Choose either a file or defaults, not both.');if(defaults)return null;if(!file)throw Error('Select both JSON sources or explicitly choose defaults.');if(file.size>650000)throw Error('Source too large for the Toolkit upload (650 KB per document).');const bytes=new Uint8Array(await file.arrayBuffer());let raw='';for(let i=0;i<bytes.length;i+=8192)raw+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(raw);}
 for(const kind of ['settings','preferences'])for(const field of ['file','defaults'])$('config-'+kind+'-'+field).onchange=()=>{preview=null;render();};
 $('config-status').onclick=()=>execute({operation:'status'});
@@ -93,7 +113,7 @@ $('config-confirm').onclick=()=>{if(preview&&status?.maintenance?.confirm)return
 $('config-backup').onclick=()=>execute({operation:'backup'});
 $('config-restore').onclick=()=>{const backup_id=$('config-backup-id').value.trim();if(!/^backup-[a-f0-9]{32}\.sqlite$/.test(backup_id)){$('config-result').textContent='Enter a valid backup ID.';return;}return execute({operation:'restore',backup_id,store_id:status.store_id,epoch:status.epoch});};
 $('config-retry').onclick=()=>{if(last?.request_id)return execute(last,true);};
-$('config-save').onclick=()=>{if(!snapshot)return;const patch=[];for(const [section,key,defaultValue] of fields){const input=$('setting-'+section+'-'+key);if(input.disabled)continue;const value=typeof defaultValue==='boolean'?input.checked:typeof defaultValue==='number'?Number(input.value):input.value;if(value!==(original[section]?.[key]??defaultValue))patch.push({op:'set',path:[section,key],value});}if(patch.length)return execute({operation:'patch',namespace:'settings',store_id:snapshot.store_id,epoch:snapshot.epoch,revision:snapshot.revision,patch});};
+$('config-save').onclick=()=>{if(!snapshot)return;const patch=[];for(const [section,key,defaultValue] of fields){const input=$('setting-'+section+'-'+key);if(input.disabled)continue;const value=typeof defaultValue==='boolean'?input.checked:typeof defaultValue==='number'?Number(input.value):input.value;if(value!==(original[section]?.[key]??defaultValue))patch.push({op:'set',path:[section,key],value});}if(!patch.length){$('config-message').textContent='No settings changed.';$('config-result').textContent='No settings changed.';return;}if(patch.length)return execute({operation:'patch',namespace:'settings',store_id:snapshot.store_id,epoch:snapshot.epoch,revision:snapshot.revision,patch});};
 window.addEventListener('toolkit-download-change',async()=>{if(busy||unavailable)return;try{status=await call({operation:'status'});render();}catch(e){$('config-result').textContent=e.message;}});
 render();if(!unavailable)return execute({operation:'status'});
 })();

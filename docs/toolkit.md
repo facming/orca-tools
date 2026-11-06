@@ -54,3 +54,10 @@ Toolkit设置不保存token、SSH私钥或OAuth。浏览器管理API仅回环监
 ## 更新到 1.2.0
 
 运行 `node scripts/build-toolkit-ui.cjs`，然后 `node plugins/toolkit/Install.cjs`，或从 Orca 插件页重新导入该插件目录。刷新列表并按 Orca 提示审核/启用新版本。插件命令与原快捷键都进入统一页面；现有下载记录、连接配置、GPU 项目、Git 设置、工作流和许可保持不变。新版本无需重启 GPU 桥接服务。源文件 hash 改变可能要求重新审核，安装器不会绕过审核。
+
+
+## 7B-11 Host 功能清单
+
+macOS 新入口为 Orca 的 Help → Orca Toolkit：账户、下载、GPU/原生引擎状态、设置。普通插件命令会明确指向 Host 菜单。Windows 保留原有管理界面。
+
+[完整功能清单、验证范围和剩余风险](toolkit-host-7b11.md)：账户/下载/远程浏览已接入 Host；macOS 原生引擎项目编辑和任务操作仍走既有 MCP，尚未与 Windows 项目 UI 完全一致。安装延后，RELEASE BLOCKED 保留。

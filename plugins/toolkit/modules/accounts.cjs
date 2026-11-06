@@ -66,14 +66,14 @@ class Accounts {
   this.switching=true;
   try{
    const state=await this.list(settings);const account=state.accounts.find(a=>a.id===body.accountId);
-   if(!isCurrent())throw new ToolkitError('Remote connection changed. Refresh before switching.');
+   if(!await isCurrent())throw new ToolkitError('Remote connection changed. Refresh before switching.');
    if(!account)throw new ToolkitError('Account not found. Refresh to try again.');
    if(account.needsSignIn)throw new ToolkitError('Sign in again on the remote host to use this account.');
    if(body.expectedActiveAccountId!==state.activeAccountId)throw new ToolkitError('The active account has changed. Refresh before switching.');
    if(account.current)return state;
    await this.call(settings,'accounts.selectClaude',{accountId:account.id});
    const after=await this.list(settings);
-   if(!isCurrent())throw new ToolkitError('Remote connection changed. Refresh to check the selected account.');
+   if(!await isCurrent())throw new ToolkitError('Remote connection changed. Refresh to check the selected account.');
    if(after.activeAccountId!==account.id)throw new ToolkitError('Switch not confirmed. Refresh to check the active account.');
    return after;
   }finally{this.switching=false;}

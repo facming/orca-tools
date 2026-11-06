@@ -9,7 +9,9 @@ export default async function activate(api) {
   if(runtime.platform==='darwin')runtime.configClient=hostConfiguration.createHostClient(api);
   service=await hub.startServer({runtime,
     async onComplete(job){try{await api.host.call('notifications.show',{title:'Download complete',body:job.name+' · SHA-256 verified'});}catch{}}});
+  const hostRequired=()=>{throw Error('On macOS, open Help → Orca Toolkit → Accounts, Downloads, GPU & native tools, or Settings. These actions require the Orca Host window.');};
   const open=async(url,args={})=>{
+    if(runtime.platform==='darwin')return hostRequired();
     if(args.openBrowser!==false)await runtime.openUrl(url);
     return {url,ready:true};
   };
@@ -20,8 +22,8 @@ export default async function activate(api) {
     if(runtime.platform==='win32')await service.controller.openGpu();
     return open(service.url+'#workflows',args);
   });
-  if(runtime.platform==='darwin')api.commands.register('toolkit.configuration',()=>{throw Error('Open configuration maintenance from the Orca Host menu. Plugin commands do not authorize configuration access.');});
-  api.commands.register('toolkit.pause-downloads',async()=>{await service.controller.downloads?.pauseAll();return {ok:true};});
+  api.commands.register('toolkit.configuration',args=>runtime.platform==='darwin'?hostRequired():open(service.url+'#settings',args));
+  api.commands.register('toolkit.pause-downloads',async()=>{if(runtime.platform==='darwin')return hostRequired();await service.controller.requireDownloads().pauseAll();return {ok:true};});
   api.log('Orca Toolkit is ready. Ctrl+Alt+T opens the control center.');
   // open() starts both ComfyUI and the authenticated GPU bridge; it does not
   // open a browser. Starting only ComfyUI leaves every remote MCP offline.

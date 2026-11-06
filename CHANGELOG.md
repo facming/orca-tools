@@ -1,3 +1,10 @@
+## 2026-11-06 — Toolkit product regression 7B-11 (RELEASE BLOCKED)
+
+- Add explicit Host menu routes for accounts, downloads, GPU/native status and settings; ordinary plugin commands cannot claim privileged work succeeded.
+- Reuse account UI and engine adapters in the sealed Host window; fix stale account actions and missing four-engine status. Preserve Windows manager and GPU startup.
+- Improve download progress/ETA, cancellation, pause-all, retry recovery, browser navigation and request identity after successful creation.
+- Record product regression, native GUI parity gaps and the deferred local signing/install acceptance plan. See [7B-11 checklist and risks](docs/toolkit-host-7b11.md).
+
 ## 2026-11-06 — Toolkit Host 7B-10 (RELEASE BLOCKED)
 
 - Make released terminal cleanup retryable after restart and lost responses; preserve task intent after post-create disk failures and deduplicate concurrent requests.

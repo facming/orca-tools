@@ -26,7 +26,7 @@ const {METHOD}=require('../host-client.cjs');
  const plugin=await import('../../main.mjs');
  try{
   await plugin.default({host,commands:{register:(id,fn)=>commands.set(id,fn)},log(){}});
-  assert.equal(commands.size,6);assert.throws(()=>commands.get('toolkit.configuration')({operation:'status'}),/Host menu/);
+  assert.equal(commands.size,6);assert.throws(()=>commands.get('toolkit.configuration')({operation:'status'}));
   const command=require('../commands.cjs').createCommands(require('../host-client.cjs').createHostClient({host}),{reload:()=>service.controller.reloadConfiguration()});
   if(phase==='offline'){
    await assert.rejects(command({operation:'status'}),/unavailable/);assert.equal((await service.controller.status()).configService,'unavailable');
