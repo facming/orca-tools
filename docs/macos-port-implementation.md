@@ -337,3 +337,7 @@ Toolkit 分别显示 ComfyUI/Godot/Blender 状态。Blender available/running �
 
 
 阶段 7B-8 增量：[Host configuration / task ownership 实施与边界](toolkit-host-7b8.md)。RELEASE BLOCKED 继续保留。
+
+## 7B-10 recovery and local-use status
+
+See [7B-10 implementation](toolkit-host-7b10.md) and [test evidence](toolkit-host-7b10-validation.txt). Host recovery, cleanup and browser/preference migration are implemented; a locally installable trusted app remains separate acceptance work. Developer ID/public notarization is deferred at user request; authentication is unchanged. RELEASE BLOCKED.

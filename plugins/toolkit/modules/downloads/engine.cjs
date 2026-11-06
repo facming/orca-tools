@@ -40,6 +40,7 @@ function chunkSize(size, concurrency) {
 }
 class DownloadManager {
   constructor(options) {
+    if(options.runtime?.platform==='darwin'&&!options.transport&&!options.hostTasks)throw new ToolkitError('macOS downloads require the Orca main Host lifecycle');
     if(options.hostTasks?.signal?.aborted)throw new ToolkitError('Host task session revoked');
     this.options = options; this.root = options.dataDir; this.jobs = new Map(); this.runs = new Map();
     this.live = new Map(); this.slots = new Semaphore(16); this.closed = false;
@@ -73,12 +74,16 @@ class DownloadManager {
     for(const record of this.recovery){
       const job=this.jobs.get(record.id);if(!job)continue;
       job.hostState=record.state;job.recoveryError=record.reason||null;
-      if(record.reason){job.cleanupWarning=record.reason;continue;}
-      job.hostIntent=false;
+      if(record.reason){job.status='review';job.verified=false;job.cleanupWarning=record.reason;continue;}
+      job.hostIntent=false;job.verified=record.state==='complete';
       job.status=['complete','cancelled'].includes(record.state)?record.state:'paused';
       // JSON flags never establish revocation; cleanup re-verifies the signed envelope.
       job.cleanupWarning='Transfer access cleanup requires verification; use Clear access.';
       this.save(job);
+      if(record.released){
+        try{await this.transport.cleanup(job);job.cleanupWarning=null;this.save(job);}
+        catch{job.cleanupWarning='Host lease released; local key cleanup still requires verified receipt. Retry Clear access.';this.save(job);}
+      }
     }
   }
   save(job) { const file=path.join(this.root,'jobs',job.id+'.json');if(this.privateFiles&&fs.existsSync(file))privatePath(file);writeJson(file,job); }
@@ -91,7 +96,7 @@ class DownloadManager {
       return {id:job.id, source:job.source, name:job.name, destination:job.destination, status:job.status,
         size:job.size || 0, bytes, speed, percent:job.status==='complete'?100:job.size?Math.min(100,bytes/job.size*100):0,
         concurrency:job.concurrency, connections:live?.ranges.size||0, retries:job.retries||0,
-        error:job.error||null, verified:job.verified||false, cleanupWarning:job.cleanupWarning||null,authorizationState:job.authorizationState||null};
+        error:job.error||null, verified:job.verified||false, cleanupWarning:job.cleanupWarning||null,authorizationState:job.authorizationState||null,recoveryError:job.recoveryError||null};
     });
   }
   async create({source, folder, concurrency=12, requestId}) {
@@ -101,7 +106,7 @@ class DownloadManager {
       const existing=[...this.jobs.values()].find(job=>job.requestId===requestId);
       if(existing){
         if(existing.source!==source||path.dirname(existing.destination)!==path.resolve(folder)||existing.concurrency!==concurrency)throw new ToolkitError('Download request_id conflict');
-        if(existing.hostIntent){await this.options.hostTasks.create(this.target(),existing.id);existing.hostIntent=false;this.save(existing);await this.start(existing);}
+        if(existing.hostIntent){await this.options.hostTasks.create(this.target(),existing.id);try{existing.hostIntent=false;this.save(existing);}catch(error){existing.hostIntent=true;throw error;}await this.start(existing);}
         return this.list().find(job=>job.id===existing.id);
       }
     }
@@ -118,9 +123,8 @@ class DownloadManager {
     const job={id,source,name:path.basename(destination),destination,partial:path.join(folder,`.${name}.${id}.part`),
       concurrency,chunk:4*1024*1024,status:'preparing',size:0,done:[],retries:0};
     if(this.options.hostTasks){job.protocol=3;job.hostIntent=true;if(requestId)job.requestId=requestId;}
-    if(this.privateFiles&&!this.options.transport&&!this.options.hostTasks){job.protocol=3;await (this.options.runtime?.configClient||require('../../config-service/client.cjs')).mutate({op:'lease-acquire',task_id:id,target:Object.fromEntries(['environment','sshHost','sshUser','sshPort'].map(k=>[k,this.options[k]]))});}
     this.save(job); this.jobs.set(id,job);
-    if(this.options.hostTasks){await this.options.hostTasks.create(this.target(),id);job.hostIntent=false;this.save(job);}
+    if(this.options.hostTasks){await this.options.hostTasks.create(this.target(),id);try{job.hostIntent=false;this.save(job);}catch(error){job.hostIntent=true;throw error;}}
     await this.start(job); return this.list().find(j=>j.id===id);
   }
   start(job) {
@@ -137,6 +141,11 @@ class DownloadManager {
   }
   async run(job,signal) {
     job.error=null;
+    if(this.options.hostTasks&&job.sha256){
+      const meta=await this.transport.prepare(job);
+      if(meta.size!==job.size||meta.sha256!==job.sha256)throw new ToolkitError('Saved metadata differs from signed registration. Retain files and clear access before restarting.');
+      job.verified=false;
+    }
     if (!job.sha256) {
       job.status='preparing';job.cleanupWarning='Transfer access cleanup pending; use Clear access.';this.save(job);
       const meta=await this.transport.prepare(job);

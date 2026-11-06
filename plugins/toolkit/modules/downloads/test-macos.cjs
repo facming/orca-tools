@@ -87,20 +87,15 @@ test('remote browser rejects traversal, sibling prefixes, symlinks, unconfirmed 
  const safe=await browser.list('Mock',{directory:'/project/safe',query:'中文'});assert.equal(safe.entries[0].name,'中文.bin');assert.equal(safe.parent,'/project');
  outside=true;await assert.rejects(browser.list('Mock',{directory:'/project'}),/outside/);outside=false;confirmed=false;await assert.rejects(browser.list('Mock',{directory:'/project'}),/confirmed/);confirmed=true;client.isRemote=false;await assert.rejects(browser.list('Mock'),/not remote/);
 });
-test('macOS HTTP reports setup/configured/ready/error honestly, keeps Accounts/GPU boundaries and opens Finder',macOnly,async t=>{
- const root=temp(t),r=runtime(root);for(const file of [r.ssh,r.keygen])fs.writeFileSync(file,'',{mode:0o700});let creates=0,browses=0,opened,connection;
- const fake={jobs:new Map(),list(){return [...this.jobs.values()];},async close(){},async create({folder}){const job={id:'a'.repeat(32),status:'complete',destination:path.join(folder,'mock.bin'),verified:true};this.jobs.set(job.id,job);return job;}};
- r.openPath=async folder=>{opened=folder;};let fail=false;
- const service=await startServer({runtime:r,port:0,createDownloads:opts=>{creates++;connection=opts.onConnection;return fake;},gpu:{async status(){return {online:false};}},remoteBrowser:{async list(){browses++;if(fail)throw Error('secret pairing');return {directory:'/project',entries:[],parent:null};}}});t.after(()=>service.close());
+test('macOS localhost download mutations cannot create an engine or bypass main ownership',macOnly,async t=>{
+ const root=temp(t),r=runtime(root);let creates=0,browses=0;
+ const service=await startServer({runtime:r,port:0,createDownloads:()=>{creates++;throw Error('forbidden');},gpu:{async status(){return {online:false};}},remoteBrowser:{async list(){browses++;throw Error('forbidden');}}});t.after(()=>service.close());
  const html=await (await fetch(service.url)).text(),headers={'X-Toolkit-Token':html.match(/const token='([a-f0-9]+)'/)[1],'Content-Type':'application/json',Origin:service.url.slice(0,-1)};
- const get=route=>fetch(service.url+'api/'+route,{headers}).then(r=>r.json());const post=(route,body)=>fetch(service.url+'api/'+route,{method:'POST',headers,body:JSON.stringify(body)});
- assert.equal((await get('status')).modules.downloads.status,'needs-setup');assert.equal(creates,0);assert.equal(browses,0);
- const settings=structuredClone(service.controller.settings);settings.downloads={enabled:true,environment:'Mock',sshHost:'100.64.0.20',sshUser:'worker',sshPort:22};assert.equal((await post('settings',settings)).status,200);
- let state=await get('status');assert.equal(state.modules.downloads.status,'configured');assert.equal(state.modules.downloads.available,true);assert.equal(state.modules.accounts.status,'preview');assert.equal(state.modules.gpu.status,'offline');assert.equal(browses,0);
- assert.equal((await get('downloads/jobs')).defaultFolder,path.join(root,'Downloads','Orca'));await post('downloads/remote-browse',{directory:'/project'});assert.equal((await get('status')).modules.downloads.status,'ready');
- fail=true;await post('downloads/remote-browse',{directory:'/project'});state=await get('status');assert.equal(state.modules.downloads.status,'error');assert.ok(!JSON.stringify(state).includes('secret'));connection('offline');assert.equal((await get('status')).modules.downloads.status,'offline');
- const folder=path.join(root,'中文 folder');await post('downloads/jobs',{source:'/project/file',folder});const jobs=await get('downloads/jobs');assert.equal(jobs.jobs[0].status,'complete');await post('downloads/open-folder',{id:jobs.jobs[0].id});assert.equal(opened,folder);
- fake.jobs.set('pending',{status:'paused'});settings.downloads.environment='Other';assert.equal((await post('settings',settings)).status,400);fake.jobs.clear();fs.unlinkSync(r.keygen);await service.controller.configureDownloads();assert.equal((await get('status')).modules.downloads.status,'error');assert.equal(service.controller.downloads,null);
+ for(const route of ['jobs','action','remote-browse','remote-location','choose-folder','open-folder','pause-all']){
+  const reply=await fetch(service.url+'api/downloads/'+route,{method:'POST',headers,body:JSON.stringify({id:'a'.repeat(32),action:'cleanup'})});assert.equal(reply.status,403);
+ }
+ assert.equal(creates,0);assert.equal(browses,0);assert.equal(service.controller.downloads,null);
+ assert.throws(()=>new DownloadManager({runtime:r,dataDir:r.downloadsDir}),/main Host/);
 });
 test('publication interrupted after APFS hard-link resumes only the same inode and verified bytes',macOnly,async t=>{
  const f=engineFixture(t,1024);const unlink=fs.unlinkSync;let blocked=true;

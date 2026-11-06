@@ -72,6 +72,8 @@ class TaskRecords:
             if not row or (r['owner'], r['epoch'], r['revision']) != (row[0], row[1], str(row[2])):
                 raise ValueError('Task owner, epoch or revision conflict')
             state, released = r['state'], r['released']
+            if row[4] and released is True and state == row[3]:
+                return next(t for t in self.inventory()['tasks'] if t['task_id'] == r['task_id'])
             if (type(released) is not bool or row[4] or state not in STATES or
                     (state != row[3] and state not in STATES[row[3]]) or
                     (released and state not in ('complete', 'cancelled'))):

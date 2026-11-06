@@ -33,6 +33,7 @@ class Controller {
 
  async configureDownloads(){
   if(this.downloads){await this.downloads.close();this.downloads=null;}
+  if(this.runtime.platform==='darwin'){this.downloadAvailability='host-required';this.downloadError='Open downloads from the Orca Host maintenance menu.';return;}
   this.downloadError='';this.downloadAvailability='needs-setup';if(!this.settings.downloads.enabled||!this.settings.downloads.environment)return;
   try{
    require('./modules/downloads/runtime.cjs').checkDownloadsRuntime(this.runtime);

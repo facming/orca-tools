@@ -16,30 +16,45 @@
 <h2>Downloads</h2>
 <p>Downloads use the remote endpoint configured above. Paused and unresolved tasks retain access until verified cleanup.</p>
 <form id="host-download-form"><label>Remote file <input id="host-download-source" required placeholder="/project/file"></label>
+<button id="host-download-remote" type="button">Browse remote files…</button>
 <label>Local folder <input id="host-download-folder" required></label><button id="host-download-browse" type="button">Choose folder…</button>
 <label>Connections <input id="host-download-concurrency" type="number" min="1" max="16" value="12" required></label>
-<button id="host-download-create" type="submit">Download</button><button id="host-download-refresh" type="button">Refresh tasks</button></form>
+<button id="host-download-create" type="submit">Download</button><button id="host-download-refresh" type="button">Refresh tasks</button><button id="host-download-reconcile" type="button">Retry recovery</button></form>
+<fieldset id="host-download-browser" hidden><legend>Remote files</legend>
+<label>Directory <input id="host-download-directory"></label><button id="host-download-go" type="button">Go</button><button id="host-download-roots" type="button">Projects</button><button id="host-download-up" type="button">Parent</button>
+<label>Filter <input id="host-download-query"></label><label><input id="host-download-hidden" type="checkbox">Show hidden files</label>
+<div id="host-download-entries"></div><button id="host-download-more" type="button">Next page</button><button id="host-download-close" type="button">Close browser</button></fieldset>
 <p id="host-download-error" role="status"></p><div id="host-download-jobs"></div><pre id="host-download-recovery"></pre>
 </section>
 <script nonce="__TOKEN__">
 (()=>{
  const $=id=>document.getElementById('host-download-'+id),api=window.orcaToolkitDownloads;
- let pending=false,lastCreate=null,refreshError=false;
- const controls=()=>{for(const id of ['create','browse','refresh'])$(id).disabled=pending||!api;};
+ let pending=false,lastCreate=null,initialized=false,enabled=false,listing=null,polling=false;
+ const controls=()=>{for(const id of ['create','browse','refresh','reconcile','remote','go','roots','up','more'])$(id).disabled=pending||!api||(id==='create'&&!enabled)||(id==='more'&&!listing?.hasMore)||(id==='up'&&!listing?.parent);for(const button of $('jobs').querySelectorAll('button'))button.disabled=pending||button.dataset.blocked==='true';for(const button of $('entries').querySelectorAll('button'))button.disabled=pending||button.dataset.blocked==='true';};
  async function invoke(request){if(!api)throw Error('Open downloads from the Orca Host maintenance menu.');return api.call(request);}
- async function refresh(){const state=await invoke({operation:'list'});if(refreshError){$('error').textContent='';refreshError=false;}$('jobs').replaceChildren();$('recovery').textContent=state.recovery.filter(r=>r.reason).map(r=>r.id+': '+r.reason).join('\n');
-  for(const job of state.jobs){const row=document.createElement('fieldset'),title=document.createElement('legend'),info=document.createElement('p');title.textContent=job.name;info.textContent=job.status+' · '+job.percent.toFixed(1)+'% · '+job.bytes+' / '+job.size+' bytes · '+Math.round(job.speed)+' B/s';row.append(title,info);
-   const detail=document.createElement('p');detail.textContent=[job.destination,job.error,job.cleanupWarning].filter(Boolean).join(' — ');row.append(detail);
-   const actions=['preparing','downloading','verifying'].includes(job.status)?['pause']:['paused','error'].includes(job.status)?['resume','cancel','cleanup']:job.status==='complete'||job.status==='cancelled'?['cleanup']:['cancel','cleanup'];
-   for(const action of actions){const button=document.createElement('button');button.type='button';button.textContent=({pause:'Pause',resume:'Resume',cancel:'Cancel',cleanup:'Clear access'})[action];button.disabled=pending;button.onclick=()=>perform({operation:'action',id:job.id,action});row.append(button);}$('jobs').append(row);
-  }
+ async function refresh(){const state=await invoke({operation:'list'});enabled=state.enabled;
+  if(!initialized){if(!$('folder').value)$('folder').value=state.defaultFolder||'';if(!$('source').value)$('source').value=state.remoteLocation?.source||'';$('directory').value=state.remoteLocation?.directory||'';initialized=true;}
+  $('jobs').replaceChildren();$('recovery').textContent=state.recovery.filter(r=>r.reason).map(r=>r.id+': '+r.reason).join('\n');
+  for(const job of state.jobs){const row=document.createElement('fieldset'),title=document.createElement('legend'),info=document.createElement('p');title.textContent=job.name;info.textContent=job.status+' · '+job.percent.toFixed(1)+'% · '+job.bytes+' / '+job.size+' bytes · '+Math.round(job.speed)+' B/s · '+job.retries+' retries';row.append(title,info);
+   const progress=document.createElement('progress');progress.max=100;progress.value=job.percent;progress.setAttribute('aria-label',job.name+' progress');row.append(progress);
+   const detail=document.createElement('p');detail.textContent=[job.destination,job.error,job.cleanupWarning,job.status==='paused'?'Resume explicitly after checking the remote connection.':null].filter(Boolean).join(' — ');row.append(detail);
+   const actions=['preparing','downloading','verifying'].includes(job.status)?['pause']:['paused','error'].includes(job.status)?['resume','cancel','cleanup']:['complete','cancelled'].includes(job.status)?['cleanup']:['cancel','cleanup'];
+   for(const action of [...actions,'open-folder']){const button=document.createElement('button');button.type='button';button.textContent=({pause:'Pause',resume:'Resume',cancel:'Cancel',cleanup:'Clear access','open-folder':'Open folder'})[action];button.dataset.blocked=String(!!job.recoveryError&&action!=='open-folder');button.onclick=()=>perform(action==='open-folder'?{operation:action,id:job.id}:{operation:'action',id:job.id,action});row.append(button);}$('jobs').append(row);
+  }controls();
  }
- async function perform(request){if(pending)return;refreshError=false;pending=true;controls();$('error').textContent='Working…';try{await invoke(request);await refresh();$('error').textContent='';}catch(e){$('error').textContent=e.message;}finally{pending=false;controls();}}
+ async function perform(request,accept){if(pending)return;pending=true;controls();$('error').textContent='Working…';try{const result=await invoke(request);await accept?.(result);await refresh();$('error').textContent=result?.warning||'';window.dispatchEvent(new Event('toolkit-download-change'));}catch(e){$('error').textContent=e.message;try{await refresh();}catch{}window.dispatchEvent(new Event('toolkit-download-change'));}finally{pending=false;controls();}}
+ function browse(directory,offset=0){return perform({operation:'browse-remote',directory,offset,query:$('query').value,showHidden:$('hidden').checked},result=>{
+  listing=result;$('browser').hidden=false;$('directory').value=result.directory;$('entries').replaceChildren();
+  if(!result.entries.length)$('entries').textContent='No matching files.';
+  for(const entry of result.entries){const button=document.createElement('button');button.type='button';button.textContent=(entry.isDirectory?'Folder: ':'File: ')+entry.name;button.dataset.blocked=String(entry.isSymlink);button.onclick=()=>{if(entry.isDirectory)browse(entry.path);else{$('source').value=entry.path;$('browser').hidden=true;}};$('entries').append(button,document.createElement('br'));}
+ });}
  $('form').onsubmit=e=>{e.preventDefault();const input={operation:'create',source:$('source').value.trim(),folder:$('folder').value.trim(),concurrency:Number($('concurrency').value)};const key=JSON.stringify(input);if(lastCreate?.key!==key)lastCreate={key,requestId:crypto.randomUUID()};perform({...input,requestId:lastCreate.requestId});};
- $('browse').onclick=async()=>{try{const result=await invoke({operation:'choose-folder'});if(result.path)$('folder').value=result.path;}catch(e){$('error').textContent=e.message;}};
- $('refresh').onclick=()=>perform({operation:'list'});
+ $('browse').onclick=()=>perform({operation:'choose-folder'},result=>{if(result.path)$('folder').value=result.path;});
+ $('remote').onclick=()=>browse($('directory').value);$('go').onclick=()=>browse($('directory').value);$('roots').onclick=()=>browse('');$('up').onclick=()=>browse(listing.parent);$('more').onclick=()=>browse(listing.directory,listing.offset+200);$('close').onclick=()=>{$('browser').hidden=true;};
+ $('refresh').onclick=()=>perform({operation:'list'});$('reconcile').onclick=()=>perform({operation:'reconcile'});
+ window.addEventListener('toolkit-configuration-reload',()=>{initialized=false;listing=null;$('browser').hidden=true;});
  controls();if(!api)$('error').textContent='Downloads require the Orca Host maintenance menu.';
- if(api)setInterval(()=>{if(!pending)refresh().catch(e=>{refreshError=true;$('error').textContent=e.message;});},2000);
+ if(api)setInterval(async()=>{if(pending||polling)return;polling=true;try{await refresh();}catch(e){$('error').textContent=e.message;}finally{polling=false;}},2000);
 })();
 (()=>{
 const $=id=>document.getElementById(id),buttons=['status','reload','preview','confirm','backup','restore','retry','save'];
@@ -79,6 +94,7 @@ $('config-backup').onclick=()=>execute({operation:'backup'});
 $('config-restore').onclick=()=>{const backup_id=$('config-backup-id').value.trim();if(!/^backup-[a-f0-9]{32}\.sqlite$/.test(backup_id)){$('config-result').textContent='Enter a valid backup ID.';return;}return execute({operation:'restore',backup_id,store_id:status.store_id,epoch:status.epoch});};
 $('config-retry').onclick=()=>{if(last?.request_id)return execute(last,true);};
 $('config-save').onclick=()=>{if(!snapshot)return;const patch=[];for(const [section,key,defaultValue] of fields){const input=$('setting-'+section+'-'+key);if(input.disabled)continue;const value=typeof defaultValue==='boolean'?input.checked:typeof defaultValue==='number'?Number(input.value):input.value;if(value!==(original[section]?.[key]??defaultValue))patch.push({op:'set',path:[section,key],value});}if(patch.length)return execute({operation:'patch',namespace:'settings',store_id:snapshot.store_id,epoch:snapshot.epoch,revision:snapshot.revision,patch});};
+window.addEventListener('toolkit-download-change',async()=>{if(busy||unavailable)return;try{status=await call({operation:'status'});render();}catch(e){$('config-result').textContent=e.message;}});
 render();if(!unavailable)return execute({operation:'status'});
 })();
 </script>

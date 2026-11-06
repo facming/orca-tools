@@ -67,7 +67,7 @@ test('v3 real SSHSIG registration, signed metadata, retry and cleanup against au
  // reconstruction. Only range transport is synthetic; registration/receipts use
  // real SSHSIG, Ed25519 and persistent authority SQLite above.
  const {DownloadManager}=require('./engine.cjs');
- const options={dataDir:path.join(root,'manager'),runtime:tr.runtime,environment:'test',sshHost:'100.64.0.20',sshUser:'reader',sshPort:22};
+ const options={dataDir:path.join(root,'manager'),runtime:tr.runtime,environment:'test',sshHost:'100.64.0.20',sshUser:'reader',sshPort:22,hostTasks:{async create(){},async transition(){}}};
  const manager=new DownloadManager(options);let entered;
  const reading=new Promise(resolve=>{entered=resolve;});
  Object.assign(manager.transport,{trust,manage:tr.manage,read:async(_job,_offset,_length,signal)=>{entered();await new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(Error('Paused')),{once:true}));}});

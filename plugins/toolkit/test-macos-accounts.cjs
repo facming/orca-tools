@@ -13,14 +13,14 @@ test('macOS initialization, page opens, passive GETs and status never construct 
   await fetch(f.server.url+'accounts/');await f.request('accounts/open',{});
   assert.equal((await f.request('accounts')).body.requiresRefresh,true);
   const status=(await f.request('status')).body;
-  assert.equal(status.modules.accounts.status,'preview');assert.equal(status.modules.downloads.status,'needs-setup');assert.equal(status.modules.gpu.status,'offline');
+  assert.equal(status.modules.accounts.status,'preview');assert.equal(status.modules.downloads.status,'host-required');assert.equal(status.modules.gpu.status,'offline');
  }
  assert.equal(f.loads,0);assert.equal(f.calls.length,0);
  const result=await f.request('accounts/refresh',{});assert.equal(result.status,200);
  assert.deepEqual(f.constructors,[[f.runtime.userDataPath,30000,null,'Mock remote',f.runtime.cli]]);
  assert.equal((await f.request('status')).body.modules.accounts.status,'ready');
  assert.equal((await f.request('accounts')).body.accounts.length,3);assert.equal(f.calls.length,1);
- for(const route of ['downloads/jobs','gpu/open'])assert.equal((await f.request(route,{})).status,400);
+ for(const route of ['downloads/jobs','gpu/open'])assert.equal((await f.request(route,{})).status,route.startsWith('downloads')?403:400);
 });
 test('only the configured environment is used, settings changes invalidate readiness without RPC',async t=>{
  const f=await started(t),c=f.server.controller;

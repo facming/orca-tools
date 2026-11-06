@@ -1,3 +1,11 @@
+## 2026-11-06 — Toolkit Host 7B-10 (RELEASE BLOCKED)
+
+- Make released terminal cleanup retryable after restart and lost responses; preserve task intent after post-create disk failures and deduplicate concurrent requests.
+- Revalidate signed metadata on resume, reject forged completion/receipts, and retain maintenance barriers while local keys remain.
+- Reuse remote browsing and preferences in the Host window; add recovery retry, directory choice, progress and Finder reveal.
+- Deny legacy macOS plugin/localhost download mutations; retain Windows and GPU paths.
+- Document local-use-first acceptance, actual ad-hoc tests, installed-app read-only audit and remaining packaging/enrollment blockers. See [7B-10](docs/toolkit-host-7b10.md).
+
 # Changelog
 
 ## 2026-11-06 — Host download integration 7B-9 (RELEASE BLOCKED)

@@ -17,7 +17,13 @@ let electron;
  const cp=require('node:child_process');
  const {ToolkitAuthority}=require(${JSON.stringify(authorityBundle)});
  const {validate}=require(${JSON.stringify(path.join(config,'commands.cjs'))});
- global.fixture={allow:true,confirmations:[],calls:[]};
+ global.fixture={allow:true,confirmations:[],calls:[],folder:${JSON.stringify(path.join(root,'chosen folder'))}};
+ dialog.showOpenDialog=async()=>({canceled:!global.fixture.folder,filePaths:global.fixture.folder?[global.fixture.folder]:[]});
+ const Module=require('node:module'),originalLoad=Module._load;
+ Module._load=function(file,...rest){if(file.endsWith('/out/cli/runtime-client.js'))return {RuntimeClient:class{constructor(){this.isRemote=true;}async call(method,{path}){if(method!=='files.browseServerDir')throw Error('unexpected RPC');return {ok:true,_meta:{runtimeId:'fixture'},result:{pathFlavor:'posix',resolvedPath:path,entries:[{name:'data.bin',isDirectory:false,isSymlink:false},{name:'sub',isDirectory:true,isSymlink:false}]}};}}};return originalLoad.call(this,file,...rest);};
+ cp.execFile=()=>{throw Error('unexpected external request');};
+ cp.execFile[require('node:util').promisify.custom]=async(file,args)=>{if(args[0]!=='repo'||args[1]!=='list')throw Error('unexpected external request');return {stdout:JSON.stringify({ok:true,result:{repos:[{path:'/project'}]}}),stderr:''};};
+
  dialog.showMessageBox=async(_panel,options)=>{global.fixture.confirmations.push(options);return {response:global.fixture.allow?1:0};};
  const authority=new ToolkitAuthority({validate,createHostHandler:authorize=>async(envelope,grant)=>{
   if(!authorize(grant))throw Error('revoked');global.fixture.calls.push(envelope.request.op);
@@ -39,10 +45,19 @@ let electron;
  await page.locator('#config-save').click();await page.waitForFunction(()=>document.getElementById('config-result').textContent.includes('"operation": "patch"'));
  await page.locator('#config-backup').click();await page.waitForFunction(()=>document.getElementById('config-backup-id').value.startsWith('backup-'));
  await page.locator('#config-restore').click();await page.waitForFunction(()=>document.getElementById('config-result').textContent.includes('"operation": "restore"'));
- assert.deepEqual(await page.evaluate(()=>window.orcaToolkitDownloads.call({operation:'list'})),{jobs:[],recovery:[]});
+ const downloads=await page.evaluate(()=>window.orcaToolkitDownloads.call({operation:'list'}));assert.deepEqual(downloads.jobs,[]);assert.deepEqual(downloads.recovery,[]);assert.equal(downloads.defaultFolder,path.join(root,'Downloads','Orca'));
+ await page.locator('#host-download-browse').click();await page.waitForFunction(()=>document.getElementById('host-download-folder').value.endsWith('chosen folder'));
+ await page.locator('#host-download-remote').click();await page.getByRole('button',{name:'Folder: /project',exact:true}).click();await page.getByRole('button',{name:'File: data.bin',exact:true}).click();
+ assert.equal(await page.locator('#host-download-source').inputValue(),'/project/data.bin');
+ const saved=await page.evaluate(()=>window.orcaToolkitDownloads.call({operation:'list'}));assert.equal(saved.defaultFolder,path.join(root,'chosen folder'));assert.equal(saved.remoteLocation.directory,'/project');
+ await electron.evaluate(()=>{global.fixture.folder=null;});await page.locator('#host-download-browse').click();await page.waitForFunction(()=>!document.getElementById('host-download-browse').disabled);assert.equal(await page.locator('#host-download-folder').inputValue(),path.join(root,'chosen folder'));
+ await assert.rejects(page.evaluate(()=>window.orcaToolkitDownloads.call({operation:'browse-remote',directory:'/etc'})),/authorized/);
+ await assert.rejects(page.evaluate(()=>window.orcaToolkitDownloads.call({operation:'action',id:'a'.repeat(32),action:'release'})));
+
  const invoke=request=>JSON.parse(cp.execFileSync('python3',[path.join(config,'fixture.py'),state],{input:JSON.stringify(request),encoding:'utf8'}));
  const status=invoke({op:'status'}).result;
  assert.equal(invoke({op:'task-create',request_id:require('node:crypto').randomUUID(),task_id:'a'.repeat(32),owner:'b'.repeat(32),epoch:status.epoch,store_id:status.store_id,target:{environment:'fixture',sshHost:'100.64.0.20',sshUser:'reader',sshPort:22}}).ok,true);
+ await page.locator('#host-download-reconcile').click();await page.waitForFunction(()=>document.getElementById('host-download-recovery').textContent.includes('no local file'));
  await page.locator('#config-status').click();await page.waitForFunction(()=>document.getElementById('config-capabilities').textContent.includes('leases'));
  assert.equal(await page.locator('#config-restore').isDisabled(),true);assert.equal(await page.locator('#setting-downloads-sshHost').isDisabled(),true);
  const visible=await page.evaluate(()=>window.orcaToolkitConfiguration.call({operation:'status'}));assert.equal(JSON.stringify(visible).includes('owner'),false);
@@ -51,7 +66,7 @@ let electron;
   const other=new BrowserWindow({show:false,webPreferences:{sandbox:true,contextIsolation:true,nodeIntegration:false,preload:stage+'/preload.cjs'}});
   try{await other.loadFile(stage+'/panel.html');other.webContents.send('toolkit:ready:v1');return await other.webContents.executeJavaScript("window.orcaToolkitDownloads.call({operation:'list'}).then(()=>false,()=>true)");}finally{other.destroy();}
  },stage);assert.equal(denied,true);
- await page.screenshot({path:'/tmp/toolkit-host-electron-7b9.png',fullPage:true});
+ await page.screenshot({path:'/tmp/toolkit-host-electron-7b10.png',fullPage:true});
  assert.equal(await electron.evaluate(()=>global.fixture.panel.isVisible()),false);
- console.log('PASS: actual hidden Electron 1000x900 + production window/preload/sealed engine; preview, native-dialog Cancel/Allow fixture, edit, backup/restore, leased target restrictions, redacted owner, second-WebContents denial. Identity/dialog answers synthetic; not Developer ID acceptance.');
+ console.log('PASS: actual hidden Electron 1000x900 + production window/preload/sealed engine; preview, native-dialog Cancel/Allow fixture, edit, backup/restore, leased target restrictions, remote browsing, saved preferences, folder selection/cancellation, redacted owner, second-WebContents denial. Identity/dialog answers synthetic; not Developer ID acceptance.');
 })().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>{await electron?.close();fs.rmSync(root,{recursive:true,force:true});});

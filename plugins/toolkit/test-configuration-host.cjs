@@ -32,11 +32,11 @@ test('async clients keep per-instance and per-namespace snapshots, preserving ex
 });
 test('maintenance UI gates capabilities, preserves unknown fields and retries the same mutation',async t=>{
  const backend=fixture.install(t),elements=new Map();
- const element=id=>{if(!elements.has(id))elements.set(id,{disabled:false,checked:false,files:[],value:'',textContent:'',append(){}});return elements.get(id);};
+ const element=id=>{if(!elements.has(id))elements.set(id,{disabled:false,checked:false,files:[],value:'',textContent:'',append(){},querySelectorAll(){return [];}});return elements.get(id);};
  const source=fs.readFileSync(path.join(__dirname,'configuration-panel.html'),'utf8').match(/<script nonce="__TOKEN__">([\s\S]*?)<\/script>/)[1];
  const requests=[];let fail=false;
  const command=createCommands(backend);
- const window={dispatchEvent(){},orcaToolkitConfiguration:{call:async request=>{requests.push(request);if(fail)throw Error('service offline');const result=await command(request);return request.operation==='status'?{...result,maintenance:{targetChange:true,confirm:false,restore:true,reason:''}}:result;}}};
+ const window={addEventListener(){},dispatchEvent(){},orcaToolkitConfiguration:{call:async request=>{requests.push(request);if(fail)throw Error('service offline');const result=await command(request);return request.operation==='status'?{...result,maintenance:{targetChange:true,confirm:false,restore:true,reason:''}}:result;}}};
  await vm.runInNewContext(source,{document:{getElementById:element,createElement:()=>({append(){}})},window,crypto,Event:class{},Uint8Array,btoa:s=>Buffer.from(s,'binary').toString('base64')});
  await element('config-preview').onclick();assert.match(element('config-result').textContent,/Select both/);
  const bytes=Buffer.from('{"future":9007199254740993123456789}');element('config-settings-file').files=[{size:bytes.length,arrayBuffer:async()=>Uint8Array.from(bytes).buffer}];element('config-preferences-defaults').checked=true;

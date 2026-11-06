@@ -31,7 +31,9 @@ async function startServer(options){
     if(options.runtime.platform==='darwin'&&(req.method!=='GET'||!['/api/gpu/workflows','/api/gpu/health'].includes(req.url)))throw new ToolkitError('Only ComfyUI is supported on macOS.');
     return send(200,await gpuAdmin.request(req.url.replace('/api/gpu/','/api/')));
    }
+   if(options.runtime.platform==='darwin'&&req.method==='POST'&&req.url.startsWith('/api/downloads/'))return send(403,{error:'Downloads require the Orca main Host maintenance window.'});
    if(req.method==='GET'&&req.url==='/api/downloads/jobs'){
+    if(options.runtime.platform==='darwin')return send(200,{availability:(await controller.status()).modules.downloads,jobs:[]});
     const availability=(await controller.status()).modules.downloads;
     return send(200,{availability,jobs:controller.downloads?.list()||[],defaultFolder:await preferences.defaultFolder(dataDir,options.runtime.home),remoteLocation:await preferences.remoteLocation(dataDir,controller.settings.downloads.environment)});
    }

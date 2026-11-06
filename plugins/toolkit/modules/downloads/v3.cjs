@@ -49,6 +49,7 @@ class V3Transport extends SshTransport{
   job.authorizationState='preparing';this.persist(job);
   const dir=this.directory(job);privateDirectory(this.dataDir);privateDirectory(path.join(this.dataDir,'keys'));privateDirectory(dir);
   const key=path.join(dir,'key');
+  if(!fs.existsSync(key)&&job.registrationId)throw new ToolkitError('Registered task key is missing; retain task for review.');
   if(!fs.existsSync(key))await this.execute(this.runtime.keygen,['-q','-t','ed25519','-N','','-f',key],{env:this.runtime.childEnv,timeout:15000});
   privatePath(key);const pub=fs.lstatSync(key+'.pub');if(!pub.isFile()||pub.uid!==process.getuid()||pub.nlink!==1)throw new ToolkitError('Invalid task public key.');fs.chmodSync(key+'.pub',0o600);
   const publicKey=fs.readFileSync(key+'.pub','utf8').trim().split(/\s+/).slice(0,2).join(' ');
