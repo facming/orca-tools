@@ -15,6 +15,7 @@ import threading
 import time
 import uuid
 import zlib
+from xml.parsers.expat import ExpatError
 
 from .macos import private_dir, private_path, write_private
 
@@ -77,8 +78,11 @@ def open_inside(root, value):
 def executable(value, engine="godot"):
     p = canonical(value)
     if p.suffix.lower() == '.app':
-        with inside(p, 'Contents/Info.plist').open('rb') as stream:
-            meta = plistlib.load(stream)
+        try:
+            with inside(p, 'Contents/Info.plist').open('rb') as stream:
+                meta = plistlib.load(stream)
+        except (ValueError, ExpatError):
+            raise ValueError('Invalid application metadata.') from None
         name = meta.get('CFBundleExecutable', '')
         if not re.fullmatch(r'[A-Za-z0-9_.-]+', name) or engine not in meta.get('CFBundleIdentifier', '').lower():
             raise ValueError('Select a ' + engine.title() + ' application bundle.')

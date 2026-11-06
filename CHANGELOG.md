@@ -1,3 +1,11 @@
+## 2026-11-06 — macOS project workbench 7B-12 (RELEASE BLOCKED)
+
+- Add Host project discovery/selection, real file browsing/preview and TextEdit entry, native task submit/query/cancel, results/logs and explicit execution consent.
+- Reuse Blender/Godot/Unity Bridge engines and ComfyUI workflow library; add ComfyUI lifecycle/import/typed parameters/execute/inspect and stable retry identities.
+- Connect approved project roots to downloads and verified resources back to the workbench; keep ordinary plugin authority unchanged.
+- Fix engine discovery interrupted by unrelated malformed application metadata. Add actual hidden Electron/loopback/filesystem validation; keep synthetic engines and unperformed hardware acceptance separate.
+- macOS is the target; Windows code remains, with no UI parity or hardware obligation. See [features, risks and deferred installation](docs/toolkit-host-7b12.md) and [test evidence](docs/toolkit-host-7b12-validation.txt).
+
 ## 2026-11-06 — Toolkit product regression 7B-11 (RELEASE BLOCKED)
 
 - Add explicit Host menu routes for accounts, downloads, GPU/native status and settings; ordinary plugin commands cannot claim privileged work succeeded.

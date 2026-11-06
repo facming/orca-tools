@@ -4,9 +4,10 @@ const {AccountPreferences}=require('./account-preferences.cjs');
 const {MacGpu}=require('./modules/gpu-macos.cjs');
 module.exports={create({runtime,readSettings,dataDir}){
  const accounts=new Accounts(runtime),gpu=new MacGpu(runtime);
+ const workbench=require('./host-workbench.cjs').create(runtime);
  let snapshot=null,binding='',closed=false;
  return {
-  close(){closed=true;accounts.clients.clear();snapshot=null;},
+  close(){closed=true;workbench.close();accounts.clients.clear();snapshot=null;},
   async call(command){
    if(closed)throw Error('Toolkit session closed');
    const settings=await readSettings(),key=JSON.stringify(settings.accounts);
@@ -34,6 +35,7 @@ module.exports={create({runtime,readSettings,dataDir}){
     }catch(error){snapshot=null;throw error;}
    }
    if(!settings.gpu.enabled)throw Error('GPU tools are disabled. Enable them in Host settings.');
+   if(command.operation==='workbench')return workbench.call(command.command);
    if(command.operation==='gpu-status')return gpu.status();
    if(command.operation==='gpu-workflows')return gpu.request('/api/workflows');
    throw Error('Unsupported Toolkit operation');

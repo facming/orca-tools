@@ -1,0 +1,27 @@
+<section id="host-workbench" aria-label="Project workbench">
+<h2>Project workbench</h2>
+<p>Choose a locally approved project. Project scripts run with your user permissions. Review the project and task before authorizing execution.</p>
+<button id="wb-refresh" type="button">Discover projects and tasks</button>
+<p id="wb-message" role="status">Refresh to discover approved projects. Approve new roots in the local Bridge configuration during setup.</p>
+<div class="grid"><fieldset><legend>Project files</legend>
+<label>Engine <select id="wb-engine"><option value="blender">Blender</option><option value="godot">Godot</option><option value="unity">Unity</option></select></label>
+<label>Project <select id="wb-project"></select></label>
+<button id="wb-files" type="button">Browse files</button><button id="wb-download" type="button">Download into this project</button>
+<p id="wb-directory"></p><button id="wb-parent" type="button">Parent folder</button><div id="wb-entries"></div>
+<label>Selected file <input id="wb-file" readonly></label><button id="wb-edit" type="button">Edit in TextEdit</button><pre id="wb-preview"></pre>
+</fieldset><fieldset><legend>Native task</legend>
+<form id="wb-form"><label>Operation <select id="wb-task"></select></label>
+<p id="wb-hint"></p><label>Project-relative file (when required) <input id="wb-path" placeholder="scene.blend"></label>
+<details><summary>Task arguments (JSON)</summary><label>Arguments <textarea id="wb-arguments" rows="6" cols="35">{}</textarea></label></details>
+<label class="wb-consent"><input id="wb-authorized" type="checkbox" required> I authorize this project task</label>
+<button id="wb-submit" type="submit">Run task</button><button id="wb-native-stop" type="button">Stop managed session</button></form>
+</fieldset></div>
+<fieldset><legend>ComfyUI workflows</legend>
+<button id="wb-start" type="button">Start ComfyUI</button><button id="wb-stop" type="button">Stop managed ComfyUI</button><button id="wb-workflows" type="button">Refresh workflows</button>
+<p>After a startup failure, check engine status and retry Start. Unknown submissions keep their request ID; inspect the queue before retrying. Running ComfyUI jobs cannot be interrupted by this Bridge.</p>
+<form id="wb-workflow-form"><label>Workflow <select id="wb-workflow"></select></label><pre id="wb-workflow-info"></pre>
+<div id="wb-parameter-fields"></div><details><summary>Advanced parameters (JSON)</summary><label>Additional parameters <textarea id="wb-parameters" rows="3" cols="35">{}</textarea></label></details><button id="wb-workflow-run" type="submit">Run workflow</button></form>
+<label>Import approved API workflow JSON <input id="wb-import-file" type="file" accept=".json,application/json"></label><button id="wb-import" type="button">Import as new workflow</button>
+</fieldset>
+<fieldset><legend>Tasks and results</legend><button id="wb-jobs-refresh" type="button">Refresh tasks</button><div id="wb-jobs"></div><pre id="wb-result" role="status"></pre></fieldset>
+</section>

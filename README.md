@@ -68,3 +68,7 @@ python plugins/toolkit/modules/downloads/test_remote.py
 ## 维护
 
 部署、升级、备份与卸载见 [运维说明](docs/operations.md)。不要提交 `*.local.json`、运行目录、OAuth 凭据、SSH 私钥、日志或渲染素材；`.gitignore` 与静态检查已覆盖常见情况，但不能代替人工审查。
+
+### macOS workbench — 7B-12
+
+The actual product target is macOS. Windows code is retained without UI parity or hardware acceptance obligations. The sealed Host now includes native project/file/task workflows, ComfyUI workflow operations and project/download handoff. See the [feature checklist and deferred installation plan](docs/toolkit-host-7b12.md). **Draft / RELEASE BLOCKED; installation remains a separate stage.**

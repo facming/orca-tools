@@ -13,6 +13,7 @@ import subprocess
 import threading
 import time
 import uuid
+from xml.parsers.expat import ExpatError
 
 from .macos import private_dir, write_private
 from .macos_godot import (GodotControl, Unsupported, canonical, inside, open_inside,
@@ -78,7 +79,7 @@ def discover(search_dirs=None, selected=None):
             with open_inside(canonical(hub), 'Contents/Info.plist') as stream:
                 if 'unity' in plistlib.load(stream).get('CFBundleIdentifier', '').lower():
                     hubs.append(str(hub))
-        except (ValueError, OSError):
+        except (ValueError, OSError, ExpatError):
             pass
         candidates += list(root.glob('Unity/Hub/Editor/*/Unity.app')) + list(root.glob('Unity.app'))
     editors = []
@@ -88,7 +89,7 @@ def discover(search_dirs=None, selected=None):
             row = {'path': str(exe), 'version': version}
             if row not in editors:
                 editors.append(row)
-        except (ValueError, OSError):
+        except (ValueError, OSError, ExpatError):
             pass
     return {'hubs': hubs, 'editors': editors}
 

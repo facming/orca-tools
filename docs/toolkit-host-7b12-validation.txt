@@ -1,0 +1,86 @@
+7B-12 evidence — 2026-11-06 Asia/Shanghai — RELEASE BLOCKED
+Baselines: Orca f020c44215888df0d0d178c6559b4a86f9f37fcf
+           Toolkit 0a6fcf475564f18da063b53da247b05ade15554d
+
+AUTOMATED / SYNTHETIC ENGINE REGRESSION
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+108 tests: 107 PASS / 1 pre-existing platform skip / 0 failures.
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+305 tests: 302 PASS / 3 pre-existing platform skips / 0 failures.
+Includes four new workbench cases: real loopback auth, real project discovery/files,
+text/binary/editor paths, traversal/link/unknown command denial, native request-ID
+reuse and cancellation, workflow import/no-overwrite/submit/inspect/lifecycle, and
+malformed application metadata discovery. Engine execution is synthetic.
+python3 -m unittest discover -s scripts -p 'test_*.py'
+8 tests: 5 PASS / 3 pre-existing skips. Installer files only; no installation.
+
+ACTUAL MACOS ELECTRON + REAL LOCAL FILES, SYNTHETIC ENGINE EXECUTION
+ORCA_BACKGROUND_LAUNCH=1 node scripts/test-host-electron.cjs ../orca \
+ /tmp/orca-7b12-delivery/toolkit-host /tmp/orca-7b12-window.cjs \
+ /tmp/orca-7b12-authority.cjs
+PASS actual hidden Electron window, production main/preload/staged panel, 1000x900.
+Temporary HOME/profile/SQLite and real authenticated loopback Bridge admin.
+Real Unicode/space-containing project paths, browse/read/source preview, validated
+TextEdit entry, project download destination, native submit with deliberately lost
+acknowledgement then same-ID retry (one job), inspect/logs/cancel, ComfyUI start/stop,
+workflow import/run/result, unknown-command/path denial and second-WebContents denial.
+Retains account switch, configuration preview/Cancel/Allow/import/patch/backup/restore,
+remote browsing/preferences/picker cancel, orphan/lease restrictions and redaction.
+Engine execute and Comfy backend are mocks. TextEdit launch, native/JS dialog answers,
+remote accounts/listings and service identity are injected. Window remains hidden;
+no production account/VPS or local installed application is contacted.
+Screenshots /tmp/toolkit-workbench-7b12.png and /tmp/toolkit-host-electron-7b12.png,
+visually reviewed. These temporary files are not tracked or release artifacts.
+Required electron skill was not found in the local skill catalogs; repository
+Playwright/CDP harness is supplemental verification, not that skill's certification.
+
+ORCA_BACKGROUND_LAUNCH=1 node scripts/test-host-download-ui.cjs ../orca \
+ /tmp/orca-7b12-delivery/toolkit-host
+PASS headless production staged UI, 1000x900, synthetic downloads: progress/speed/ETA,
+pause/resume/pause-all/cancel, cleanup warning/retry, checksum state, disconnect and
+recovery, fresh request ID after success. No real transfer.
+
+HARDWARE / INSTALLED ENGINE QUALIFICATION — READ ONLY
+python3 scripts/probe-macos-engines.py
+PASS metadata scan without app launches or configuration reads/writes.
+Godot / Blender: no qualified installation in standard application roots.
+Unity: installed 6000.5.4f1; rejected by existing qualified 6000.0 adapter boundary.
+ComfyUI: no disposable managed environment supplied. Existing services untouched.
+Actual engine task execution, Metal, Unity C# and inference: NOT RUN.
+Windows UI/hardware: intentionally not a target; existing code retained.
+
+ORCA / BUILD
+ORCA_BACKGROUND_LAUNCH=1 pnpm test src/main/toolkit --maxWorkers=2
+12/12 PASS, 4 files. Original Host authority and closed-bundle denial retained.
+ORCA_BACKGROUND_LAUNCH=1 pnpm tc:node
+PASS.
+Full main target build: ORCA_ELECTRON_VITE_TARGET=main ORCA_BACKGROUND_LAUNCH=1 \
+ node_modules/.bin/electron-vite build --config config/electron-vite-target.config.cts
+PASS (existing dynamic-import warnings only).
+Stage with pinned Node 24.22.1; seal.mjs STAGE/toolkit-host - --test-only:
+PASS nested ad-hoc signatures and regenerated closed manifest. No enrollment.
+ORCA_BACKGROUND_LAUNCH=1 node native/toolkit-host/smoke-worker.mjs STAGE
+PASS separate worker process/IPC and private authority discovery denial.
+python3 scripts/check.py; node --check plugins/toolkit/host-workbench-ui.js;
+git diff --check: PASS.
+Full changed gate after implementation: 41/41 PASS (75 seconds). The same
+command is rerun after documentation/staging, immediately before push; its final
+result is recorded in Draft PRs. No --no-verify.
+
+INITIAL FAILURES RESOLVED
+- z.discriminatedUnion variadic map inferred no required tuple item: replaced with
+  fixed enum-discriminated schemas; typecheck passes.
+- Electron hidden JavaScript dialog interception had no live dialog to accept:
+  confirmation answers are now explicitly injected and documented as synthetic.
+- Real application scan found a malformed unrelated plist: normalize parse failure
+  and skip invalid discovery candidates; real scan and regression pass.
+- New closed module missing from seal list: synchronized stage/seal/runtime/test
+  inventories; temporary nested signing passes.
+- First full changed gate: 40/41 pass, one formatting failure; formatted the file.
+  The final changed gate is rerun after documentation/last edit.
+
+LIMITS
+No production install, service enrollment, configuration migration, production VPS,
+real-account switch, engine hardware acceptance or upstream/main change. No repeated
+Host Authority redesign. RELEASE BLOCKED remains. Existing 7B-11 deeper identity /
+Docker SSH evidence is historical, not rerun or relabeled as new hardware coverage.
