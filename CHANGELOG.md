@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-06 — Host download integration 7B-9 (RELEASE BLOCKED)
+
+- Wire the production maintenance window to a sealed main-owned download engine, private lifecycle and guarded download controls; ordinary plugins receive no task ownership or lease-release capability.
+- Persist creation intent before Host tasks, deduplicate create retries, CAS-claim interrupted tasks, and adopt only existing verified-target legacy leases. Keep unknown/orphan inventory blocked.
+- Reuse registration/revocation identities and re-verify saved signed receipts before Host release and local key deletion.
+- Run the actual hidden Electron window/preload with synthetic identity/dialog responses; fix its first-load readiness race. Add a strict read-only formal package gate; no Developer ID positive acceptance is claimed.
+- See [implementation, evidence and remaining risks](docs/toolkit-host-7b9.md). Formal signing, complete legacy recovery and macOS cross-UID acceptance remain blocked.
+
 ## 2026-11-06 — Host configuration / task ownership 7B-8 (RELEASE BLOCKED)
 
 - Add main-owned task handles, serialized lifecycle requests and durable isolated-service task records with owner/epoch/revision checks and target leases.

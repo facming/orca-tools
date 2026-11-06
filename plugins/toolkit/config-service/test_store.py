@@ -127,6 +127,45 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'epoch'):
             self.store.handle(501, request('restore', **backup, epoch=base['epoch'], store_id=base['store_id']))
 
+    def test_claim_fences_old_owner_and_concurrent_claims_without_releasing(self):
+        from concurrent.futures import ThreadPoolExecutor
+        base = self.store.read('settings')
+        identity = dict(task_id='a'*32, owner='b'*32, epoch=base['epoch'], store_id=base['store_id'])
+        target = {k: DEFAULTS['settings']['downloads'][k] for k in ('environment','sshHost','sshUser','sshPort')}
+        self.store.handle(501, request('task-create', **identity, target=target))
+        self.store.handle(501, request('task-update', **identity, revision='1', state='running', released=False))
+        self.store.close(); self.store = ConfigStore(self.root)
+        def claim(owner):
+            try:
+                return self.store.handle(501, request('task-claim', **{**identity, 'owner':owner}, previous_owner='b'*32, revision='2'))
+            except ValueError:
+                return None
+        with ThreadPoolExecutor(2) as pool:
+            results = list(pool.map(claim, ['c'*32, 'd'*32]))
+        winner = [r for r in results if r]
+        self.assertEqual(len(winner), 1)
+        self.assertEqual(winner[0]['state'], 'paused')
+        self.assertFalse(winner[0]['released'])
+        self.assertEqual(len(self.store.status()['target_leases']), 1)
+        with self.assertRaisesRegex(ValueError, 'owner'):
+            self.store.handle(501, request('task-update', **identity, revision='3', state='cancelled', released=True))
+
+    def test_legacy_adoption_requires_existing_lease_and_keeps_inventory_barrier(self):
+        base = self.store.read('settings')
+        target = {k: DEFAULTS['settings']['downloads'][k] for k in ('environment','sshHost','sshUser','sshPort')}
+        adopt = request('task-adopt', task_id='a'*32, owner='b'*32, epoch=base['epoch'], store_id=base['store_id'], target=target)
+        with self.assertRaisesRegex(ValueError, 'Legacy lease'):
+            self.store.handle(501, adopt)
+        self.store.handle(501, request('lease-acquire', task_id='a'*32, target=target))
+        self.store.db.execute("UPDATE meta SET value='legacy-review-required' WHERE key='task_inventory'")
+        result = self.store.handle(501, adopt)
+        self.assertEqual(result['state'], 'paused')
+        self.assertFalse(result['released'])
+        self.assertEqual(self.store.handle(501, adopt), result)
+        self.assertEqual(self.store.status()['task_inventory']['state'], 'legacy-review-required')
+        with self.assertRaisesRegex(ValueError, 'ownership'):
+            self.store.handle(501, request('lease-release', task_id='a'*32))
+
     def test_offline_recovery_never_trusts_an_old_empty_inventory(self):
         from recover import recover
         from unittest.mock import patch

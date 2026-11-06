@@ -71,17 +71,17 @@ class V3Transport extends SshTransport{
  async cleanup(job){
   if(job.protocol!==3)throw new ToolkitError('Legacy task: manual cleanup required; personal authorized_keys was not changed.');
   this.ensureReady();
-  if(!job.authGeneration)throw new ToolkitError('Registration result unknown; retry preparation before revocation. Task key retained.');
+  if(!job.authGeneration){if(!job.registrationId)throw new ToolkitError('Registration not established; retain task for review.');await this.prepare(job);}
   if(canonical(job.trust)!==canonical(this.trust))throw new ToolkitError('Endpoint trust changed; task key retained.');
-  const request={...this.bindings(job),op:'revoke',auth_generation:job.authGeneration,request_id:crypto.randomUUID(),client_nonce:crypto.randomBytes(32).toString('hex')};
+  const request=job.revocationChallenge||{...this.bindings(job),op:'revoke',auth_generation:job.authGeneration,request_id:crypto.randomUUID(),client_nonce:crypto.randomBytes(32).toString('hex')};
   job.authorizationState='revoking';job.revocationChallenge=request;this.persist(job);
   try{
-   const envelope=await this.manage(request);
+   const envelope=job.receipt||await this.manage(request);
    const receipt=verify(envelope,this.trust,{...this.bindings(job),action:'revoke',auth_generation:job.authGeneration,request_id:request.request_id,client_nonce:request.client_nonce,state:'REVOKED',read_barrier:'DRAINED'});
    if(!/^[1-9][0-9]*$/.test(receipt.revocation_commit_seq)||BigInt(receipt.revocation_commit_seq)<BigInt(job.revocationSequence||0))throw new ToolkitError('Stale revocation sequence.');
    job.cleanup_verified=true;job.receipt=envelope;job.revocationSequence=receipt.revocation_commit_seq;this.persist(job);
    // Commit proof before deleting only the locally bound, private task files.
-   if(this.endpointOptions?.hostTasks)await this.endpointOptions.hostTasks.transition(job.id,job.verified?'complete':'cancelled',true);
+   if(this.endpointOptions?.hostTasks)await this.endpointOptions.hostTasks.transition(job.id,job.status==='complete'?'complete':'cancelled',true);
    else await (this.runtime?.configClient||config).mutate({op:'lease-release',task_id:job.id});
    const dir=this.directory(job);if(fs.existsSync(dir))privatePath(dir,true);
    for(const name of ['key.pub','known_hosts','key']){const file=path.join(dir,name);if(fs.existsSync(file)){privatePath(file);fs.unlinkSync(file);}}

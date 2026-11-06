@@ -12,7 +12,35 @@
 <div class="actions"><button id="config-restore" class="button" type="button" disabled>Restore backup…</button><button id="config-retry" class="button" type="button" disabled>Retry last request</button></div>
 <pre id="config-result" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:28rem;overflow:auto"></pre>
 </section>
+<section aria-label="Host downloads">
+<h2>Downloads</h2>
+<p>Downloads use the remote endpoint configured above. Paused and unresolved tasks retain access until verified cleanup.</p>
+<form id="host-download-form"><label>Remote file <input id="host-download-source" required placeholder="/project/file"></label>
+<label>Local folder <input id="host-download-folder" required></label><button id="host-download-browse" type="button">Choose folder…</button>
+<label>Connections <input id="host-download-concurrency" type="number" min="1" max="16" value="12" required></label>
+<button id="host-download-create" type="submit">Download</button><button id="host-download-refresh" type="button">Refresh tasks</button></form>
+<p id="host-download-error" role="status"></p><div id="host-download-jobs"></div><pre id="host-download-recovery"></pre>
+</section>
 <script nonce="__TOKEN__">
+(()=>{
+ const $=id=>document.getElementById('host-download-'+id),api=window.orcaToolkitDownloads;
+ let pending=false,lastCreate=null,refreshError=false;
+ const controls=()=>{for(const id of ['create','browse','refresh'])$(id).disabled=pending||!api;};
+ async function invoke(request){if(!api)throw Error('Open downloads from the Orca Host maintenance menu.');return api.call(request);}
+ async function refresh(){const state=await invoke({operation:'list'});if(refreshError){$('error').textContent='';refreshError=false;}$('jobs').replaceChildren();$('recovery').textContent=state.recovery.filter(r=>r.reason).map(r=>r.id+': '+r.reason).join('\n');
+  for(const job of state.jobs){const row=document.createElement('fieldset'),title=document.createElement('legend'),info=document.createElement('p');title.textContent=job.name;info.textContent=job.status+' · '+job.percent.toFixed(1)+'% · '+job.bytes+' / '+job.size+' bytes · '+Math.round(job.speed)+' B/s';row.append(title,info);
+   const detail=document.createElement('p');detail.textContent=[job.destination,job.error,job.cleanupWarning].filter(Boolean).join(' — ');row.append(detail);
+   const actions=['preparing','downloading','verifying'].includes(job.status)?['pause']:['paused','error'].includes(job.status)?['resume','cancel','cleanup']:job.status==='complete'||job.status==='cancelled'?['cleanup']:['cancel','cleanup'];
+   for(const action of actions){const button=document.createElement('button');button.type='button';button.textContent=({pause:'Pause',resume:'Resume',cancel:'Cancel',cleanup:'Clear access'})[action];button.disabled=pending;button.onclick=()=>perform({operation:'action',id:job.id,action});row.append(button);}$('jobs').append(row);
+  }
+ }
+ async function perform(request){if(pending)return;refreshError=false;pending=true;controls();$('error').textContent='Working…';try{await invoke(request);await refresh();$('error').textContent='';}catch(e){$('error').textContent=e.message;}finally{pending=false;controls();}}
+ $('form').onsubmit=e=>{e.preventDefault();const input={operation:'create',source:$('source').value.trim(),folder:$('folder').value.trim(),concurrency:Number($('concurrency').value)};const key=JSON.stringify(input);if(lastCreate?.key!==key)lastCreate={key,requestId:crypto.randomUUID()};perform({...input,requestId:lastCreate.requestId});};
+ $('browse').onclick=async()=>{try{const result=await invoke({operation:'choose-folder'});if(result.path)$('folder').value=result.path;}catch(e){$('error').textContent=e.message;}};
+ $('refresh').onclick=()=>perform({operation:'list'});
+ controls();if(!api)$('error').textContent='Downloads require the Orca Host maintenance menu.';
+ if(api)setInterval(()=>{if(!pending)refresh().catch(e=>{refreshError=true;$('error').textContent=e.message;});},2000);
+})();
 (()=>{
 const $=id=>document.getElementById(id),buttons=['status','reload','preview','confirm','backup','restore','retry','save'];
 let preview=null,last=null,busy=false,unavailable=!window.orcaToolkitConfiguration,status=null,snapshot=null,original=null;

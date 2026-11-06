@@ -57,6 +57,8 @@ test('v3 real SSHSIG registration, signed metadata, retry and cleanup against au
  const trust={...invoke('init'),server_id:'server',endpoint_id:'endpoint',account_id:'reader',signing_key_id:'one',hostKey:'ssh-ed25519 U1lOVEhFVElD',host:'100.64.0.20',port:22,worktree:'path:/test'};
  const tr=new SshTransport({dataDir,runtime:{platform:'darwin',keygen:'/usr/bin/ssh-keygen',childEnv:{PATH:process.env.PATH}},environment:'test',sshHost:'100.64.0.20',sshUser:'reader',sshPort:22,execute:promisify(cp.execFile),spawn:cp.spawn});Object.setPrototypeOf(tr,V3Transport.prototype);tr.trust=trust;tr.manage=async r=>invoke('request',r);
  const job={id:crypto.randomUUID().replaceAll('-',''),protocol:3,source};
+ const manage=tr.manage;tr.manage=async request=>{await manage(request);throw Error('registration response lost');};
+ await assert.rejects(tr.prepare(job),/response lost/);Object.assign(job,JSON.parse(fs.readFileSync(path.join(dataDir,'jobs',job.id+'.json'))));tr.manage=manage;
  const meta=await tr.prepare(job);assert.equal(meta.size,7);assert.equal(meta.sha256,crypto.createHash('sha256').update('PAYLOAD').digest('hex'));assert.equal(job.authorizationState,'active');
  assert.deepEqual(await tr.prepare(job),meta);
  t.mock.method(config,'mutate',()=>({released:job.id}));await tr.cleanup(job);assert.equal(job.cleanup_verified,true);assert.equal(fs.existsSync(path.join(tr.directory(job),'key')),false);
@@ -90,4 +92,24 @@ test('async Host lease release must finish before deleting task keys; rejection 
   const cleanup=f.tr.cleanup(f.job);await entered;assert.ok(fs.existsSync(f.key));release();
   if(reject){await assert.rejects(cleanup,/Host offline/);assert.ok(fs.existsSync(f.key));}else{await cleanup;assert.equal(fs.existsSync(f.key),false);}
  }
+});
+
+test('restart re-verifies persisted receipt and retries Host release before deleting keys without network',async t=>{
+ const f=fixture(t);let failed=true;
+ f.tr.endpointOptions={hostTasks:{async transition(id,state,released){assert.equal(id,f.job.id);assert.equal(state,'cancelled');assert.equal(released,true);assert.ok(fs.existsSync(f.key));if(failed)throw Error('Host response lost');}}};
+ f.tr.manage=async r=>f.sign({...f.payload,request_id:r.request_id,client_nonce:r.client_nonce});
+ await assert.rejects(f.tr.cleanup(f.job),/Host response lost/);
+ const saved=JSON.parse(fs.readFileSync(path.join(f.tr.dataDir,'jobs',f.job.id+'.json')));
+ f.tr.manage=async()=>{throw Error('offline; persisted proof must suffice');};
+ const forged=structuredClone(saved);forged.receipt.signature=Buffer.alloc(64).toString('base64');
+ await assert.rejects(f.tr.cleanup(forged),/signature/);assert.ok(fs.existsSync(f.key));
+ failed=false;await f.tr.cleanup(saved);assert.equal(fs.existsSync(f.key),false);
+});
+test('lost remote revoke reply reuses the same nonce and request id, ignoring JSON revoked flags',async t=>{
+ const f=fixture(t);let original;
+ f.job.cleanup_verified=true;f.job.authorizationState='revoked';
+ f.tr.manage=async r=>{original=structuredClone(r);throw Error('reply lost');};
+ await assert.rejects(f.tr.cleanup(f.job),/reply lost/);assert.ok(fs.existsSync(f.key));
+ f.tr.manage=async r=>{assert.deepEqual(r,original);return f.sign({...f.payload,request_id:r.request_id,client_nonce:r.client_nonce});};
+ t.mock.method(config,'mutate',()=>({}));await f.tr.cleanup(f.job);assert.equal(fs.existsSync(f.key),false);
 });

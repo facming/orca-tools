@@ -28,7 +28,7 @@ for name,uid in USERS.items():
 subprocess.run(['usermod','-p','x','orca-download'],check=True)
 code=Path('/opt/orca-download');code.mkdir()
 for base in ('services/download-authorization','plugins/toolkit/config-service'):
-    for name in ('authority.py','client.py','secure_store.py','ipc.py','config_store.py','recover.py'):
+    for name in ('authority.py','client.py','secure_store.py','ipc.py','config_store.py','task_records.py','recover.py'):
         source=ROOT/base/name
         if source.exists():shutil.copyfile(source,code/name)
 shutil.copyfile(ROOT/'services/download-authorization/service.py',code/'service.py')

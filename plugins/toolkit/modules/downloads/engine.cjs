@@ -47,7 +47,8 @@ class DownloadManager {
     this.privateFiles=options.runtime?.platform==='darwin';
     if(this.privateFiles){privateDirectory(this.root);privateDirectory(path.join(this.root,'jobs'));}
     else fs.mkdirSync(path.join(this.root, 'jobs'), {recursive: true});
-    for (const name of fs.readdirSync(path.join(this.root, 'jobs'))) {
+    if(this.privateFiles)this.releaseLock=acquireLock(this.root);
+    try { for (const name of fs.readdirSync(path.join(this.root, 'jobs'))) {
       if (!/^[a-f0-9]{32}\.json$/.test(name)) continue;
       try {
         if(this.privateFiles)privatePath(path.join(this.root,'jobs',name));
@@ -60,9 +61,25 @@ class DownloadManager {
         this.jobs.set(job.id, job);
       } catch {if(this.privateFiles)throw new ToolkitError('Saved download state is invalid or unsafe. Inspect it before continuing.');}
     }
-    if(this.privateFiles)this.releaseLock=acquireLock(this.root);
+    } catch(error) { this.releaseLock?.(); throw error; }
+    this.ready=this.reconcile();
     this.hostRevoked=()=>{this.close().catch(()=>{});};
     options.hostTasks?.signal?.addEventListener('abort',this.hostRevoked,{once:true});
+  }
+  target(){return Object.fromEntries(['environment','sshHost','sshUser','sshPort'].map(key=>[key,this.options[key]]));}
+  async reconcile(){
+    if(!this.options.hostTasks?.reconcile)return;
+    this.recovery=await this.options.hostTasks.reconcile([...this.jobs.values()],this.target());
+    for(const record of this.recovery){
+      const job=this.jobs.get(record.id);if(!job)continue;
+      job.hostState=record.state;job.recoveryError=record.reason||null;
+      if(record.reason){job.cleanupWarning=record.reason;continue;}
+      job.hostIntent=false;
+      job.status=['complete','cancelled'].includes(record.state)?record.state:'paused';
+      // JSON flags never establish revocation; cleanup re-verifies the signed envelope.
+      job.cleanupWarning='Transfer access cleanup requires verification; use Clear access.';
+      this.save(job);
+    }
   }
   save(job) { const file=path.join(this.root,'jobs',job.id+'.json');if(this.privateFiles&&fs.existsSync(file))privatePath(file);writeJson(file,job); }
   list() {
@@ -77,8 +94,17 @@ class DownloadManager {
         error:job.error||null, verified:job.verified||false, cleanupWarning:job.cleanupWarning||null,authorizationState:job.authorizationState||null};
     });
   }
-  async create({source, folder, concurrency=12}) {
+  async create({source, folder, concurrency=12, requestId}) {
+    await this.ready;
     if (this.closed) throw new ToolkitError('Download manager is closing');
+    if(requestId&&this.options.hostTasks){
+      const existing=[...this.jobs.values()].find(job=>job.requestId===requestId);
+      if(existing){
+        if(existing.source!==source||path.dirname(existing.destination)!==path.resolve(folder)||existing.concurrency!==concurrency)throw new ToolkitError('Download request_id conflict');
+        if(existing.hostIntent){await this.options.hostTasks.create(this.target(),existing.id);existing.hostIntent=false;this.save(existing);await this.start(existing);}
+        return this.list().find(job=>job.id===existing.id);
+      }
+    }
     this.transport.ensureReady?.();
     if (!validRemote(source))
       throw new ToolkitError('Enter an absolute remote file path');
@@ -86,18 +112,20 @@ class DownloadManager {
     if (!Number.isInteger(concurrency) || concurrency<1 || concurrency>16) throw new ToolkitError('Choose 1 to 16 connections');
     if ([...this.jobs.values()].filter(j=>!['complete','cancelled'].includes(j.status)).length>=20) throw new ToolkitError('Pause or finish an existing download first');
     folder=path.resolve(folder);try{fs.mkdirSync(folder,{recursive:true});fs.accessSync(folder,fs.constants.W_OK|fs.constants.X_OK);}catch(error){throw localError(error);}
-    const id=this.options.hostTasks?await this.options.hostTasks.create(Object.fromEntries(['environment','sshHost','sshUser','sshPort'].map(key=>[key,this.options[key]]))):crypto.randomUUID().replaceAll('-',''), name=safeName(source), ext=path.extname(name), stem=name.slice(0,name.length-ext.length);
+    const id=crypto.randomUUID().replaceAll('-',''), name=safeName(source), ext=path.extname(name), stem=name.slice(0,name.length-ext.length);
     let destination=path.join(folder,name), suffix=1;
     while(fs.existsSync(destination)||[...this.jobs.values()].some(j=>j.destination===destination&&j.status!=='cancelled')) destination=path.join(folder,`${stem} (${++suffix})${ext}`);
     const job={id,source,name:path.basename(destination),destination,partial:path.join(folder,`.${name}.${id}.part`),
       concurrency,chunk:4*1024*1024,status:'preparing',size:0,done:[],retries:0};
-    if(this.options.hostTasks)job.protocol=3;
+    if(this.options.hostTasks){job.protocol=3;job.hostIntent=true;if(requestId)job.requestId=requestId;}
     if(this.privateFiles&&!this.options.transport&&!this.options.hostTasks){job.protocol=3;await (this.options.runtime?.configClient||require('../../config-service/client.cjs')).mutate({op:'lease-acquire',task_id:id,target:Object.fromEntries(['environment','sshHost','sshUser','sshPort'].map(k=>[k,this.options[k]]))});}
-    this.jobs.set(id,job); this.save(job);
+    this.save(job); this.jobs.set(id,job);
+    if(this.options.hostTasks){await this.options.hostTasks.create(this.target(),id);job.hostIntent=false;this.save(job);}
     await this.start(job); return this.list().find(j=>j.id===id);
   }
   start(job) {
     if(this.closed)throw new ToolkitError('Download manager is closing');
+    if(job.recoveryError)throw new ToolkitError(job.recoveryError);
     if(this.privateFiles&&!this.options.transport&&job.protocol!==3)throw new ToolkitError('Legacy task: manual cleanup required.');
     if (this.runs.has(job.id)) throw new ToolkitError('This download is already running');
     const controller=new AbortController();
@@ -112,7 +140,11 @@ class DownloadManager {
     if (!job.sha256) {
       job.status='preparing';job.cleanupWarning='Transfer access cleanup pending; use Clear access.';this.save(job);
       const meta=await this.transport.prepare(job);
-      const handle=fs.openSync(job.partial,'wx',0o600);
+      let handle;
+      try{handle=fs.openSync(job.partial,'wx',0o600);}catch(error){
+        if(error.code!=='EEXIST'||!this.privateFiles||job.done.length)throw error;
+        privatePath(job.partial);handle=fs.openSync(job.partial,fs.constants.O_RDWR|fs.constants.O_NOFOLLOW);
+      }
       try{fs.ftruncateSync(handle,meta.size);fs.fsyncSync(handle);}catch(error){fs.closeSync(handle);fs.unlinkSync(job.partial);throw error;}
       fs.closeSync(handle);job.size=meta.size;job.sha256=meta.sha256;job.fingerprint=meta.fingerprint;
       job.chunk=chunkSize(job.size,job.concurrency);
@@ -179,7 +211,9 @@ class DownloadManager {
     await this.options.onComplete?.(job).catch(()=>{});
   }
   async action(id,action) {
+    await this.ready;
     const job=this.jobs.get(id);if(!job)throw new ToolkitError('Download not found');
+    if(job.recoveryError)throw new ToolkitError(job.recoveryError);
     if(action==='pause'){
       const run=this.runs.get(id);if(run){run.controller.abort();await run.promise;}
     }else if(action==='resume'){
@@ -190,13 +224,14 @@ class DownloadManager {
       if(job.status==='complete')throw new ToolkitError('Completed files are kept');
       await this.action(id,'pause');
       await this.options.hostTasks?.transition(job.id,'cancelled');
+      job.status='cancelled';this.save(job);
       try{await this.transport.cleanup(job);job.cleanupWarning=null;}catch{job.cleanupWarning='Transfer access cleanup pending; use Clear access.';}
       fs.rmSync(job.partial,{force:true});job.status='cancelled';this.save(job);
     }else if(action==='cleanup'){
       if(this.runs.has(id))throw new ToolkitError('Pause the download before clearing access');
-      if(!['complete','cancelled'].includes(job.status))await this.options.hostTasks?.transition(job.id,'cancelled');
+      if(!['complete','cancelled'].includes(job.status)){await this.options.hostTasks?.transition(job.id,'cancelled');job.status='cancelled';this.save(job);}
       await this.transport.cleanup(job);job.cleanupWarning=null;this.save(job);
-      if(!['complete','cancelled'].includes(job.status)){job.status='cancelled';fs.rmSync(job.partial,{force:true});this.save(job);}
+      if(job.status==='cancelled'){fs.rmSync(job.partial,{force:true});this.save(job);}
     }else throw new ToolkitError('Unknown action');
     return this.list().find(j=>j.id===id);
   }

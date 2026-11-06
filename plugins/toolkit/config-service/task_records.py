@@ -33,13 +33,28 @@ class TaskRecords:
 
     def mutate(self, r):
         required = {'op', 'request_id', 'task_id', 'owner', 'epoch', 'store_id'}
-        required |= {'target'} if r['op'] == 'task-create' else {'revision', 'state', 'released'}
+        required |= ({'target'} if r['op'] in ('task-create', 'task-adopt') else
+                     {'revision', 'previous_owner'} if r['op'] == 'task-claim' else
+                     {'revision', 'state', 'released'})
         if set(r) != required or any(not isinstance(r[k], str) or not re.fullmatch(r'[a-f0-9]{32}', r[k])
                                     for k in ('task_id', 'owner', 'epoch', 'store_id')):
             raise ValueError('Invalid Host task request')
         if r['epoch'] != self.store.meta('epoch') or r['store_id'] != self.store.meta('store_id'):
             raise ValueError('Configuration epoch changed')
-        if r['op'] == 'task-create':
+        if r['op'] == 'task-adopt':
+            lease = self.db.execute('SELECT target FROM leases WHERE task=?', (r['task_id'],)).fetchone()
+            if not lease or loads(lease[0]) != r['target']:
+                raise ValueError('Legacy lease target cannot be verified')
+            self.db.execute('INSERT INTO host_tasks VALUES(?,?,?,1,?,?,0)',
+                            (r['task_id'], r['owner'], r['epoch'], 'paused', lease[0]))
+        elif r['op'] == 'task-claim':
+            row = self.db.execute('SELECT owner,epoch,revision,state,released FROM host_tasks WHERE id=?',
+                                  (r['task_id'],)).fetchone()
+            if not row or (r['previous_owner'], r['epoch'], r['revision']) != (row[0], row[1], str(row[2])):
+                raise ValueError('Task claim conflict')
+            self.db.execute('UPDATE host_tasks SET owner=?,revision=revision+1,state=? WHERE id=?',
+                            (r['owner'], 'paused' if row[3] in ('created', 'running') else row[3], r['task_id']))
+        elif r['op'] == 'task-create':
             if self.store.meta('task_inventory') != 'complete':
                 raise ValueError('Legacy task inventory requires offline review')
             settings = loads(self.store.read('settings')['raw_json'])['downloads']

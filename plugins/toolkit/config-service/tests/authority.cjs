@@ -53,15 +53,17 @@ const call=context=>authority.call(context,METHOD,envelope,approve);
   const root=fs.mkdtempSync(require('node:path').join(require('node:os').tmpdir(),'host-task-engine-'));
   const lifecycle=toolkitDownloadLifecycle(tasks),bytes=Buffer.from('Host-owned transfer fixture');
   let blockRead=false,readEntered;
-  const manager=new engine.DownloadManager({dataDir:root,environment:'',sshHost:'',sshUser:'',sshPort:22,hostTasks:lifecycle,transport:{
+  const options={dataDir:root,environment:'',sshHost:'',sshUser:'',sshPort:22,hostTasks:lifecycle,transport:{
    async prepare(){return {size:bytes.length,sha256:require('node:crypto').createHash('sha256').update(bytes).digest('hex')};},
    async read(job,offset,length,signal,write){if(blockRead){readEntered();await new Promise((resolve,reject)=>{if(signal.aborted)return reject(Error('Paused'));signal.addEventListener('abort',()=>reject(Error('Paused')),{once:true});});}write(bytes.subarray(offset,offset+length),0);},
    async cleanup(job){await lifecycle.transition(job.id,job.verified?'complete':'cancelled',true);}
-  }});
+  }};
+  let manager=new engine.DownloadManager(options);
   try{
-   const job=await manager.create({source:'/fixture/file.bin',folder:require('node:path').join(root,'output')});
+   const job=await manager.create({source:'/fixture/file.bin',folder:require('node:path').join(root,'output'),requestId:'12345678-1234-1234-1234-123456789abc'});
    await manager.runs.get(job.id)?.promise;
    assert.equal(manager.jobs.get(job.id).status,'complete');assert.deepEqual(fs.readFileSync(manager.jobs.get(job.id).destination),bytes);
+   assert.equal((await manager.create({source:'/fixture/file.bin',folder:require('node:path').join(root,'output'),requestId:'12345678-1234-1234-1234-123456789abc'})).id,job.id);
    const status=await call(context);assert.equal(status.result.task_inventory.tasks.find(t=>t.task_id===job.id).released,true);
    blockRead=true;let entered=new Promise(resolve=>{readEntered=resolve;});
    const paused=await manager.create({source:'/fixture/paused.bin',folder:require('node:path').join(root,'output')});await entered;
@@ -71,6 +73,24 @@ const call=context=>authority.call(context,METHOD,envelope,approve);
    blockRead=true;entered=new Promise(resolve=>{readEntered=resolve;});
    const cancelled=await manager.create({source:'/fixture/cancelled.bin',folder:require('node:path').join(root,'output')});await entered;
    await manager.action(cancelled.id,'cancel');const record=(await call(context)).result.task_inventory.tasks.find(t=>t.task_id===cancelled.id);assert.equal(record.state,'cancelled');assert.equal(record.released,true);
+   await manager.close();
+   const lostLifecycle={...lifecycle,async create(target,id){await lifecycle.create(target,id);throw Error('Host reply lost after commit');}};
+   manager=new engine.DownloadManager({...options,hostTasks:lostLifecycle});
+   await assert.rejects(manager.create({source:'/fixture/crash-before-run.bin',folder:require('node:path').join(root,'output')}),/reply lost/);
+   const interrupted=[...manager.jobs.values()].find(j=>j.source.endsWith('crash-before-run.bin'));
+   assert.equal(interrupted.hostIntent,true);assert.equal((await call(context)).result.task_inventory.tasks.find(t=>t.task_id===interrupted.id).state,'created');
+   interrupted.status='complete';interrupted.cleanup_verified=true;manager.save(interrupted);
+   await manager.close();
+   const restartedTasks=new ToolkitTasks(authority),restarted=toolkitDownloadLifecycle(restartedTasks);
+   manager=new engine.DownloadManager({...options,hostTasks:restarted,transport:{...options.transport,async cleanup(job){await restarted.transition(job.id,job.status==='complete'?'complete':'cancelled',true);}}});
+   await manager.ready;
+   assert.equal(manager.jobs.get(interrupted.id).status,'paused');
+   assert.equal((await call(context)).result.task_inventory.tasks.find(t=>t.task_id===interrupted.id).released,false);
+   await assert.rejects(lifecycle.transition(interrupted.id,'running'),/owner|revision/);
+   blockRead=false;await manager.action(interrupted.id,'resume');await manager.runs.get(interrupted.id)?.promise;
+   assert.equal((await call(context)).result.task_inventory.tasks.find(t=>t.task_id===interrupted.id).released,true);
+   assert.deepEqual(fs.readFileSync(manager.jobs.get(interrupted.id).destination),bytes);
+   restartedTasks.revoke();
   }finally{await manager.close();fs.rmSync(root,{recursive:true,force:true});}
   assert.equal((await send({op:'restore',request_id:require('node:crypto').randomUUID(),backup_id:backup.result.backup_id})).ok,true);
   await assert.rejects(tasks.update(handle,'running'),/epoch/);
