@@ -146,3 +146,24 @@ test('macOS Accounts page runs refresh, masking, usage, disable/enable, switch a
 });
 
 require('./fixtures/config-service.cjs').hooks(test);
+
+test('switch confirmation rejects a changed remote runtime and refreshes selected usage',async t=>{
+ const f=fixture();t.after(()=>f.close());
+ let selected=false;
+ const accounts=new Accounts(f.runtime,{createClient:()=>({isRemote:true,async call(method,params){
+  if(method==='accounts.selectClaude')selected=true;
+  if(method==='accounts.list'&&selected)assert.equal(params.refreshUsage,true);
+  return {ok:true,_meta:{runtimeId:selected?'replacement':'original'},result:snapshot()};
+ }})});
+ await assert.rejects(accounts.select({environment:'Mock'},select),/runtime changed/);
+});
+
+test('settings change during UI refresh discards the previous environment response',async t=>{
+ const f=await started(t),nodes=Object.fromEntries(['accounts','message','refresh'].map(id=>[id,new Node()])),listeners={};
+ const context=vm.createContext({document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag)},window:{addEventListener:(event,fn)=>listeners[event]=fn},setInterval(){},fetch:(url,opts)=>fetch(new URL(url,f.server.url),{...opts,headers:{...opts.headers,Origin:new URL(f.server.url).origin}})});
+ vm.runInContext(fragment('accounts.html').script.replaceAll('__TOKEN__',f.headers['X-Toolkit-Token']),context);
+ while(vm.runInContext('busy',context))await new Promise(resolve=>setTimeout(resolve,5));
+ let release;f.gate=new Promise(resolve=>release=resolve);
+ const refresh=nodes.refresh.onclick();listeners['toolkit-settings-changed']();release();await refresh;
+ assert.match(nodes.message.text,/Settings changed/);assert.ok(!nodes.accounts.text.includes('example.invalid'));
+});

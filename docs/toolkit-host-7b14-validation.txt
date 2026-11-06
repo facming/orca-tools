@@ -1,0 +1,84 @@
+7B-14 evidence — 2026-11-06 Asia/Shanghai — Draft / RELEASE BLOCKED
+Starting Orca b71e39ce33de5768800bba2fea52e3687ce4a23c
+Starting Toolkit 0d830b59b94f750a7bedf4d324d5004519f6c144
+
+REAL LOCAL HOST + EXPLICIT SYNTHETIC REMOTE
+ORCA_BACKGROUND_LAUNCH=1 node scripts/test-host-accounts-downloads.cjs ../orca \
+ /tmp/orca-7b14-delivery/toolkit-host /tmp/orca-7b14-window.cjs \
+ /tmp/orca-7b14-authority.cjs
+Actual hidden macOS Electron, 1000x900, production window/main/preload/panel.
+Temporary home/profile and both persistent SQLite authorities; real SSHSIG
+registration, Ed25519 receipts, destination writes and SHA-256 verification.
+Account list/masking/current/Session/Weekly/reset/refresh, select confirmation,
+disable/enable, disconnect/reconnect and process-restart recovery. Concurrent
+account changes reject duplicate mutations; changing account retains a paused
+active download; download target fields remain leased. Disable preference
+survives restart. Host open reads remote selection without forcing usage refresh.
+Remote browse -> file selection. 16 B and 32 MiB files, live range progress,
+network-failure injection/retry, pause-all/resume, unfinished-task deduplication,
+actual Electron exit/relaunch with paused recovery, completion/checksum,
+lost revoke reply -> cleanup retry and Finder reveal routing.
+Screenshots inspected: /tmp/toolkit-accounts-7b14.png and
+/tmp/toolkit-downloads-7b14.png. No clipping of controls at the tested viewport.
+Accounts RPC, remote listings, SSH byte transport, service identity and native
+dialog answers are SYNTHETIC. Fixed trust is injected in the test process only.
+No production endpoint trust, admission code or installed configuration changed.
+No engine tests required by this runner; no real engine/inference launches.
+
+REAL LOCAL LARGE FILE, SYNTHETIC RANGE SOURCE
+node scripts/test-download-large.cjs
+PASS: actual 1 GiB file, eight workers, bounded buffers, whole-file SHA-256,
+exclusive publication and actual file rehash after manager reconstruction.
+The temporary file is removed after validation. No remote SSH/VPS claimed.
+
+AUTOMATED REGRESSION
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+115 total: 114 PASS, one existing platform skip, zero failures.
+Includes stale-token/rate-limit/missing-login/mismatched usage provenance,
+settings drift, unconfirmed selection, RPC errors, request/Host identity,
+remote browsing/filter/hidden/pagination and preferences, failed checksum,
+no overwrite, permission denial, ENOSPC injection, corrupted saved ranges,
+SIGKILL/stale lock/recovery, cancelled partial deletion failure, unknown-create
+replay, completed file tampering after restart and verified receipt retries.
+New local-key-deletion failure test reuses the persisted verified receipt offline.
+No actual disk filling or real TCC permission revocation performed.
+
+PYTHONPATH=plugins/toolkit/config-service python3 -m unittest discover \
+ -s services/download-authorization -p 'test_authority.py'
+5/5 PASS. Initial invocation omitted PYTHONPATH and failed import; corrected.
+
+ORCA_BACKGROUND_LAUNCH=1 pnpm test src/main/toolkit --maxWorkers=2
+12/12 PASS (4 files).
+ORCA_BACKGROUND_LAUNCH=1 pnpm tc:node — PASS.
+python3 scripts/check.py — PASS.
+
+RENDERER / PACKAGING
+ORCA_BACKGROUND_LAUNCH=1 node scripts/test-host-download-ui.cjs ../orca \
+ /tmp/orca-7b14-delivery/toolkit-host
+PASS: progress/speed/ETA, pause/resume/pause-all/cancel, cleanup warning,
+verification, offline/retry, fresh successful-create IDs; a lost acknowledgement
+followed by actual renderer reload preserves the pending request ID.
+This renderer test has a fully synthetic task backend.
+
+From Orca: esbuild bundle src/main/toolkit/toolkit-window.ts (external electron
+and @orca/process-host) and native/toolkit-host/authority-test-entry.mjs, Node CJS.
+Stage with repository-pinned Node 24.22.1 and headers into a new temp directory;
+seal.mjs OUTPUT/toolkit-host - --test-only. Both PASS. Temporary ad-hoc inputs,
+not production installation/admission/signing/notarization acceptance.
+From Orca: ORCA_BACKGROUND_LAUNCH=1 node native/toolkit-host/smoke-worker.mjs OUTPUT
+PASS: actual independent worker, fork/IPC, no private configuration discovery.
+Initial smoke was launched from Toolkit cwd and could not resolve Orca sources;
+rerun from Orca succeeded.
+
+Final pnpm check:changed runs against baseline/installed-1.4.249 after final
+commit, immediately before pushing Orca. Exact result and paired commit IDs are
+recorded in both Draft PR descriptions. No --no-verify.
+
+LIMITS
+Real Claude credentials, real remote account usage and VPS/network behavior
+remain untested by explicit scope. Tests do not constitute packaged production
+acceptance. Local electron skill is absent; existing Playwright/CDP harness used.
+Hidden windows remain hidden, no desktop focus or native dialog interaction.
+Historical engine evidence remains in 7B-11/12/13; full Unity/Godot/Comfy runtime
+work is deferred. No main edits, merges, upstream pushes, production installs,
+real-config migrations or production VPS connections. RELEASE BLOCKED remains.

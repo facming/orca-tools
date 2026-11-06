@@ -1,3 +1,11 @@
+## 2026-11-06 — accounts and downloads first 7B-14 (RELEASE BLOCKED)
+
+- Focus macOS work on Claude accounts and remote downloads; freeze existing engine/workbench features and retain Windows code.
+- Restore Host account selection on open, refresh usage after switching, reject concurrent changes and changed runtime confirmations, and discard UI results invalidated by settings changes.
+- Persist unknown download request identities across window/app restarts, deduplicate unfinished transfers, rehash completed files on recovery, and retain cleanup debt until both authorization and local files are cleared.
+- Verify real hidden Electron/main/production preload, temporary authorities/signatures/files, 32 MiB integration and 1 GiB local transfer; distinguish synthetic accounts/network from real local evidence.
+- See [phase overview](docs/toolkit-status.md), [feature checklist and risks](docs/toolkit-host-7b14.md), and [test evidence](docs/toolkit-host-7b14-validation.txt).
+
 ## 2026-11-06 — macOS workbench and Unity 6000.5 API adapter 7B-13 (RELEASE BLOCKED)
 
 - Align the validated TextEdit edit command across Host and Bridge; test actual background application launch.

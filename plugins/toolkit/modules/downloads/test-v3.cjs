@@ -113,3 +113,12 @@ test('lost remote revoke reply reuses the same nonce and request id, ignoring JS
  f.tr.manage=async r=>{assert.deepEqual(r,original);return f.sign({...f.payload,request_id:r.request_id,client_nonce:r.client_nonce});};
  t.mock.method(config,'mutate',()=>({}));await f.tr.cleanup(f.job);assert.equal(fs.existsSync(f.key),false);
 });
+
+test('remote revocation followed by local key deletion failure retries verified proof offline',async t=>{
+ const f=fixture(t);t.mock.method(config,'mutate',()=>({}));
+ f.tr.manage=async r=>f.sign({...f.payload,request_id:r.request_id,client_nonce:r.client_nonce});
+ const unlink=fs.unlinkSync,mock=t.mock.method(fs,'unlinkSync',file=>{if(file===f.key)throw Object.assign(Error('local denial'),{code:'EACCES'});return unlink(file);});
+ await assert.rejects(f.tr.cleanup(f.job),/local denial/);assert.ok(fs.existsSync(f.key));assert.ok(f.job.receipt);
+ mock.mock.restore();f.tr.manage=async()=>{throw Error('network must not be used');};
+ await f.tr.cleanup(f.job);assert.equal(f.job.authorizationState,'revoked');assert.equal(fs.existsSync(f.key),false);
+});

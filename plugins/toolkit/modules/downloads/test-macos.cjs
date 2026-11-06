@@ -125,3 +125,42 @@ test('Downloads UI renders actual task status and configured/error availability 
 });
 
 require('../../fixtures/config-service.cjs').hooks(test);
+
+test('completed files are rehashed on restart even when durable Host state says complete',macOnly,async t=>{
+ const f=engineFixture(t,1024);const row=await f.m.create({source:'/project/verified.bin',folder:f.folder});
+ const job=await settled(f.m,row.id);await f.m.close();
+ f.options.hostTasks={async reconcile(){return [{id:job.id,state:'complete',released:false}];}};
+ for(const changed of [false,true]){
+  if(changed)fs.writeFileSync(job.destination,Buffer.alloc(1024,38));
+  const restarted=new DownloadManager(f.options);await restarted.ready;
+  assert.equal(restarted.list()[0].verified,!changed);
+  if(changed)assert.match(restarted.list()[0].error,/checksum verification failed/);
+  await restarted.close();
+ }
+});
+
+test('cancelled partial deletion failure retains cleanup debt and can be retried',macOnly,async t=>{
+ const f=engineFixture(t);const row=await f.m.create({source:'/project/cancel.bin',folder:f.folder});
+ while(!fs.existsSync(f.m.jobs.get(row.id).partial))await sleep(5);
+ await f.m.action(row.id,'pause');const job=f.m.jobs.get(row.id),original=fs.rmSync;
+ const mock=t.mock.method(fs,'rmSync',(file,...args)=>{if(file===job.partial)throw Object.assign(Error('denied'),{code:'EACCES'});return original(file,...args);});
+ await assert.rejects(f.m.action(row.id,'cancel'),/access denied/);
+ assert.equal(job.status,'cancelled');assert.match(job.cleanupWarning,/partial-file/);assert.ok(fs.existsSync(job.partial));
+ mock.mock.restore();await f.m.action(row.id,'cleanup');assert.equal(job.cleanupWarning,null);assert.equal(fs.existsSync(job.partial),false);
+});
+
+test('new request after an unknown create reuses the durable unfinished task',macOnly,async t=>{
+ const f=engineFixture(t);let lost=true;
+ f.m.options.hostTasks={async create(){if(lost)throw Error('lost Host reply');},async transition(){}};
+ const input={source:'/project/unknown.bin',folder:f.folder,concurrency:2};
+ await assert.rejects(f.m.create({...input,requestId:crypto.randomUUID()}),/lost Host reply/);
+ lost=false;const row=await f.m.create({...input,requestId:crypto.randomUUID()});
+ assert.equal(f.m.list().length,1);assert.equal(row.source,input.source);
+ await f.m.action(row.id,'cancel');
+});
+
+test('disk full during a range fails with a recoverable task and no published file',macOnly,async t=>{
+ const f=engineFixture(t,1024);f.options.transport.read=async()=>{throw Object.assign(Error('fixture storage full'),{code:'ENOSPC'});};
+ const row=await f.m.create({source:'/project/full.bin',folder:f.folder});const job=await settled(f.m,row.id);
+ assert.equal(job.status,'error');assert.match(job.error,/Not enough space/);assert.equal(fs.existsSync(job.destination),false);assert.ok(fs.existsSync(job.partial));
+});

@@ -15,7 +15,7 @@ module.exports={create({runtime,readSettings,dataDir}){
    const current=async()=>!closed&&key===JSON.stringify((await readSettings()).accounts);
    if(command.operation.startsWith('accounts')){
     if(!settings.accounts.enabled)throw Error('Accounts are disabled. Enable them in Host settings.');
-    if(command.operation==='accounts')return snapshot||{accounts:[],activeAccountId:null,requiresRefresh:true,message:'Refresh usage to connect to the configured remote environment.'};
+    if(command.operation==='accounts'&&snapshot)return snapshot;
     try{
      const preferences=new AccountPreferences(dataDir,{privateFiles:true});
      let result;

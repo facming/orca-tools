@@ -17,7 +17,7 @@ const {chromium}=createRequire(path.join(orca,'package.json'))('playwright');
    if(input.operation==='list')return {jobs:[job],enabled:true,recovery:[],defaultFolder:'/tmp/downloads',remoteLocation:{source:'',directory:''}};
    if(input.operation==='pause-all')job.status='paused';
    if(input.operation==='action'){if(input.action==='pause')job.status='paused';if(input.action==='resume')job.status='downloading';if(input.action==='cancel')job.status='cancelled';if(input.action==='cleanup')job.cleanupWarning=null;}
-   if(input.operation==='create'){window.fixture.creates.push(input.requestId);return {job};}
+   if(input.operation==='create'){window.fixture.creates.push(input.requestId);if(localStorage.getItem('drop-create'))throw Error('Synthetic lost create acknowledgement');return {job};}
    return {};
   }};
  });
@@ -37,6 +37,14 @@ const {chromium}=createRequire(path.join(orca,'package.json'))('playwright');
  await page.locator('#host-download-source').fill('/project/fixture.bin');await page.locator('#host-download-create').click();await page.waitForFunction(()=>!document.getElementById('host-download-create').disabled);
  await page.locator('#host-download-create').click();await page.waitForFunction(()=>window.fixture.creates.length===2);
  const ids=await page.evaluate(()=>window.fixture.creates);assert.notEqual(ids[0],ids[1]);
+ await page.evaluate(()=>localStorage.setItem('drop-create','yes'));
+ await page.locator('#host-download-create').click();await page.waitForFunction(()=>!document.getElementById('host-download-create').disabled);
+ const unknown=await page.evaluate(()=>window.fixture.creates.at(-1));
+ await page.reload();await page.waitForFunction(()=>!document.getElementById('host-download-create').disabled);
+ await page.locator('#host-download-source').fill('/project/fixture.bin');
+ await page.locator('#host-download-create').click();await page.waitForFunction(()=>window.fixture.creates.length===1);
+ assert.equal(await page.evaluate(()=>window.fixture.creates[0]),unknown);
+ await page.evaluate(()=>localStorage.removeItem('drop-create'));
  await page.locator('#host-downloads').screenshot({path:'/tmp/toolkit-downloads-7b11.png'});
  console.log('PASS: production staged UI at 1000x900; progress/speed/ETA, pause/resume/pause-all/cancel, cleanup warning, verification, offline/retry, fresh create IDs. Synthetic task backend; no transfer or remote connection.');
  }finally{await browser.close();}

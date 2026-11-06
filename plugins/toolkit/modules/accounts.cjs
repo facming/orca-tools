@@ -40,7 +40,7 @@ function publicState(result,verifiedActiveId=null){
 }
 class Accounts {
  constructor(runtime,options={}){this.runtime=runtime;this.createClient=options.createClient||(env=>createRemoteClient(runtime,env));this.clients=new Map();this.switching=false;}
- async call(settings,method,params){
+ async call(settings,method,params,identity){
   if(!settings.environment)throw new ToolkitError('Set the remote environment in Toolkit settings.');
   let client=this.clients.get(settings.environment);
   try{
@@ -49,13 +49,14 @@ class Accounts {
    const r=await client.call(method,params);
    if(r?.ok!==true)throw remoteAccountError(r?.error);
    if(typeof r._meta?.runtimeId!=='string'||!r._meta.runtimeId.trim())throw new ToolkitError('Remote accounts RPC is incompatible: runtime identity is missing.');
+   if(identity){if(identity.runtimeId&&identity.runtimeId!==r._meta.runtimeId)throw new ToolkitError('Remote runtime changed. Refresh to confirm the current account.');identity.runtimeId=r._meta.runtimeId;}
    return r.result;
   }catch(error){this.clients.delete(settings.environment);throw error instanceof ToolkitError?error:remoteAccountError(error);}
  }
- async list(settings,refreshUsage=false){
-  const first=await this.call(settings,'accounts.list',{refreshUsage}),id=first?.claude?.activeAccountId,candidate=first?.rateLimits?.claude;
+ async list(settings,refreshUsage=false,identity={}){
+  const first=await this.call(settings,'accounts.list',{refreshUsage},identity),id=first?.claude?.activeAccountId,candidate=first?.rateLimits?.claude;
   if(typeof id==='string'&&missingProvenance(candidate)&&candidate?.status==='ok'&&!candidate.error&&snapshotBinding(first,id)){
-   const second=await this.call(settings,'accounts.list',{refreshUsage:false});
+   const second=await this.call(settings,'accounts.list',{refreshUsage:false},identity);
    return publicState(second,snapshotBinding(second,id)?id:null);
   }
   return publicState(first);
@@ -65,14 +66,14 @@ class Accounts {
   if(this.switching)throw new ToolkitError('An account switch is in progress. Refresh shortly.');
   this.switching=true;
   try{
-   const state=await this.list(settings);const account=state.accounts.find(a=>a.id===body.accountId);
+   const identity={};const state=await this.list(settings,false,identity);const account=state.accounts.find(a=>a.id===body.accountId);
    if(!await isCurrent())throw new ToolkitError('Remote connection changed. Refresh before switching.');
    if(!account)throw new ToolkitError('Account not found. Refresh to try again.');
    if(account.needsSignIn)throw new ToolkitError('Sign in again on the remote host to use this account.');
    if(body.expectedActiveAccountId!==state.activeAccountId)throw new ToolkitError('The active account has changed. Refresh before switching.');
    if(account.current)return state;
-   await this.call(settings,'accounts.selectClaude',{accountId:account.id});
-   const after=await this.list(settings);
+   await this.call(settings,'accounts.selectClaude',{accountId:account.id},identity);
+   const after=await this.list(settings,true,identity);
    if(!await isCurrent())throw new ToolkitError('Remote connection changed. Refresh to check the selected account.');
    if(after.activeAccountId!==account.id)throw new ToolkitError('Switch not confirmed. Refresh to check the active account.');
    return after;

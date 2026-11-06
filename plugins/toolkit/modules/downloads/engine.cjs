@@ -69,22 +69,41 @@ class DownloadManager {
   }
   target(){return Object.fromEntries(['environment','sshHost','sshUser','sshPort'].map(key=>[key,this.options[key]]));}
   async reconcile(){
-    if(!this.options.hostTasks?.reconcile)return;
-    this.recovery=await this.options.hostTasks.reconcile([...this.jobs.values()],this.target());
-    for(const record of this.recovery){
-      const job=this.jobs.get(record.id);if(!job)continue;
-      job.hostState=record.state;job.recoveryError=record.reason||null;
-      if(record.reason){job.status='review';job.verified=false;job.cleanupWarning=record.reason;continue;}
-      job.hostIntent=false;job.verified=record.state==='complete';
-      job.status=['complete','cancelled'].includes(record.state)?record.state:'paused';
-      // JSON flags never establish revocation; cleanup re-verifies the signed envelope.
-      job.cleanupWarning='Transfer access cleanup requires verification; use Clear access.';
-      this.save(job);
-      if(record.released){
-        try{await this.transport.cleanup(job);job.cleanupWarning=null;this.save(job);}
-        catch{job.cleanupWarning='Host lease released; local key cleanup still requires verified receipt. Retry Clear access.';this.save(job);}
+    if(this.options.hostTasks?.reconcile){
+      this.recovery=await this.options.hostTasks.reconcile([...this.jobs.values()],this.target());
+      for(const record of this.recovery){
+        const job=this.jobs.get(record.id);if(!job)continue;
+        job.hostState=record.state;job.recoveryError=record.reason||null;
+        if(record.reason){job.status='review';job.verified=false;job.cleanupWarning=record.reason;continue;}
+        job.hostIntent=false;job.verified=false;
+        job.status=['complete','cancelled'].includes(record.state)?record.state:'paused';
+        // JSON flags never establish revocation; cleanup re-verifies the signed envelope.
+        job.cleanupWarning='Transfer access cleanup requires verification; use Clear access.';
+        this.save(job);
+        if(record.released){
+          try{await this.cleanup(job);}
+          catch{job.cleanupWarning='Host lease released; local key cleanup still requires verified receipt. Retry Clear access.';this.save(job);}
+        }
       }
     }
+    for(const job of this.jobs.values()){
+      if(job.status!=='complete')continue;
+      job.verified=false;
+      try{await this.verifyPublished(job);job.verified=true;job.error=null;}
+      catch{job.error='Downloaded file is missing, changed or unreadable. Check the destination; checksum verification failed.';}
+      this.save(job);
+    }
+  }
+  async verifyPublished(job){
+    const handle=await fs.promises.open(job.destination,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
+    try{
+      const before=await handle.stat();
+      if(!before.isFile()||before.size!==job.size||!job.sha256)throw Error('Invalid downloaded file');
+      const digest=crypto.createHash('sha256');
+      for await(const block of handle.createReadStream({autoClose:false}))digest.update(block);
+      const after=await handle.stat();
+      if(digest.digest('hex')!==job.sha256||after.size!==before.size||after.mtimeMs!==before.mtimeMs)throw Error('Downloaded file changed');
+    }finally{await handle.close();}
   }
   save(job) { const file=path.join(this.root,'jobs',job.id+'.json');if(this.privateFiles&&fs.existsSync(file))privatePath(file);writeJson(file,job); }
   list() {
@@ -103,9 +122,9 @@ class DownloadManager {
     await this.ready;
     if (this.closed) throw new ToolkitError('Download manager is closing');
     if(requestId&&this.options.hostTasks){
-      const existing=[...this.jobs.values()].find(job=>job.requestId===requestId);
+      const existing=[...this.jobs.values()].find(job=>job.requestId===requestId)||[...this.jobs.values()].find(job=>!['complete','cancelled','review'].includes(job.status)&&job.source===source&&path.dirname(job.destination)===path.resolve(folder)&&job.concurrency===concurrency);
       if(existing){
-        if(existing.source!==source||path.dirname(existing.destination)!==path.resolve(folder)||existing.concurrency!==concurrency)throw new ToolkitError('Download request_id conflict');
+        if((existing.target&&JSON.stringify(existing.target)!==JSON.stringify(this.target()))||existing.source!==source||path.dirname(existing.destination)!==path.resolve(folder)||existing.concurrency!==concurrency)throw new ToolkitError('Download request_id conflict');
         if(existing.hostIntent){await this.options.hostTasks.create(this.target(),existing.id);try{existing.hostIntent=false;this.save(existing);}catch(error){existing.hostIntent=true;throw error;}await this.start(existing);}
         return this.list().find(job=>job.id===existing.id);
       }
@@ -122,7 +141,7 @@ class DownloadManager {
     while(fs.existsSync(destination)||[...this.jobs.values()].some(j=>j.destination===destination&&j.status!=='cancelled')) destination=path.join(folder,`${stem} (${++suffix})${ext}`);
     const job={id,source,name:path.basename(destination),destination,partial:path.join(folder,`.${name}.${id}.part`),
       concurrency,chunk:4*1024*1024,status:'preparing',size:0,done:[],retries:0};
-    if(this.options.hostTasks){job.protocol=3;job.hostIntent=true;if(requestId)job.requestId=requestId;}
+    if(this.options.hostTasks){job.protocol=3;job.hostIntent=true;job.target=this.target();if(requestId)job.requestId=requestId;}
     this.save(job); this.jobs.set(id,job);
     if(this.options.hostTasks){await this.options.hostTasks.create(this.target(),id);try{job.hostIntent=false;this.save(job);}catch(error){job.hostIntent=true;throw error;}}
     await this.start(job); return this.list().find(j=>j.id===id);
@@ -191,7 +210,7 @@ class DownloadManager {
                 let written=0;while(written<data.length){const count=fs.writeSync(fd,data,written,data.length-written,offset+position+written);if(!count)throw new ToolkitError('Unable to write download range.');written+=count;}digest.update(data);received+=data.length;live.ranges.set(index,received);
               });if(received!==length)throw new ToolkitError('Incomplete byte range');job.chunkHashes[index]=digest.digest('hex');}finally{live.ranges.delete(index);}
             });success=true;break;
-          }catch(error){lastError=error;if(signal.aborted)break;job.retries++;this.save(job);
+          }catch(error){lastError=error;if(signal.aborted)break;if(['ENOSPC','EACCES','EPERM','EROFS'].includes(error.code)){failed=true;throw localError(error);}job.retries++;this.save(job);
             await new Promise(resolve=>{const timer=setTimeout(finish,Math.min(10000,1000*(attempt+1)));function finish(){clearTimeout(timer);signal.removeEventListener('abort',finish);resolve();}signal.addEventListener('abort',finish,{once:true});});
           }
         }
@@ -234,15 +253,23 @@ class DownloadManager {
       await this.action(id,'pause');
       await this.options.hostTasks?.transition(job.id,'cancelled');
       job.status='cancelled';this.save(job);
-      try{await this.transport.cleanup(job);job.cleanupWarning=null;}catch{job.cleanupWarning='Transfer access cleanup pending; use Clear access.';}
-      fs.rmSync(job.partial,{force:true});job.status='cancelled';this.save(job);
+      await this.cleanup(job);
     }else if(action==='cleanup'){
       if(this.runs.has(id))throw new ToolkitError('Pause the download before clearing access');
       if(!['complete','cancelled'].includes(job.status)){await this.options.hostTasks?.transition(job.id,'cancelled');job.status='cancelled';this.save(job);}
-      await this.transport.cleanup(job);job.cleanupWarning=null;this.save(job);
-      if(job.status==='cancelled'){fs.rmSync(job.partial,{force:true});this.save(job);}
+      await this.cleanup(job);
     }else throw new ToolkitError('Unknown action');
     return this.list().find(j=>j.id===id);
+  }
+  async cleanup(job){
+    try{
+      await this.transport.cleanup(job);
+      if(job.status==='cancelled')fs.rmSync(job.partial,{force:true});
+      job.cleanupWarning=null;this.save(job);
+    }catch(error){
+      job.cleanupWarning='Access or partial-file cleanup pending; retry Clear access.';this.save(job);
+      throw localError(error);
+    }
   }
   async pauseAll(){await Promise.all([...this.runs.keys()].map(id=>this.action(id,'pause')));}
   async close(){this.closed=true;this.options.hostTasks?.signal?.removeEventListener('abort',this.hostRevoked);await this.pauseAll();if(this.releaseLock){this.releaseLock();this.releaseLock=null;}}
