@@ -16,7 +16,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'orca-large-download-'));
   const row=await manager.create({source:'/fixture/one-gib.bin',folder:path.join(root,'files'),concurrency:8});
   await manager.runs.get(row.id).promise;
   const done=manager.list()[0];assert.equal(done.status,'complete');assert.equal(done.verified,true);assert.equal(fs.statSync(done.destination).size,size);
-  await manager.close();const reopened=new DownloadManager(manager.options);try{await reopened.ready;assert.equal(reopened.list()[0].verified,true);}finally{await reopened.close();}
+  await manager.close();const reopened=new DownloadManager(manager.options);try{await reopened.ready;assert.equal(reopened.list()[0].verificationState,'pending');assert.equal(reopened.list()[0].verified,false);await reopened.verificationDone;assert.equal(reopened.list()[0].verified,true);}finally{await reopened.close();}
   console.log('PASS: actual macOS 1 GiB destination, eight range workers, SHA-256 publication and restart rehash. Remote ranges synthetic; no VPS/SSH acceptance.');
  }finally{await manager.close();}
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(()=>fs.rmSync(root,{recursive:true,force:true}));

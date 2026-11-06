@@ -10,7 +10,7 @@ function snapshotBinding(result,id){
  return account.managedAuthRuntime==='wsl'&&typeof account.wslDistro==='string'&&account.wslDistro.length>0&&target.runtime==='wsl'&&target.wslDistro===account.wslDistro&&state.activeAccountIdsByRuntime?.wsl?.[account.wslDistro]===id;
 }
 function missingProvenance(usage){return usage?.usageMetadata?.authProvenance==null;}
-function usageDetails(result,id,verifiedActiveId){
+function usageDetails(result,id,verifiedActiveId,strictProvenance){
  const limits=result.rateLimits||{},active=id===result.claude.activeAccountId;
  const candidate=active?limits.claude:limits.inactiveClaudeAccounts?.find(a=>a.accountId===id)?.rateLimits;
  const updatedAt=timestamp(candidate?.updatedAt),fail=candidate?.usageMetadata?.failureKind;
@@ -25,7 +25,7 @@ function usageDetails(result,id,verifiedActiveId){
  // Orca invalidates the target's usage cache on account changes. For older
  // snapshots lacking provenance, verify the selection/target mapping twice.
  const snapshot=active&&missingProvenance(candidate)&&verifiedActiveId===id&&snapshotBinding(result,id)&&candidate.status==='ok'&&!candidate.error;
- if((active&&!explicit&&!snapshot)||(!active&&provenance!=null&&!explicit))return empty('unverified-account','Cannot confirm which account this usage belongs to. Refresh usage to retry.');
+ if((strictProvenance&&!explicit)||(active&&!explicit&&!snapshot)||(!active&&provenance!=null&&!explicit))return empty('unverified-account','Cannot confirm which account this usage belongs to. Refresh usage to retry.');
  const clean={updatedAt};let hasUsage=false;
  for(const key of ['session','weekly']){const w=candidate[key],used=w?.usedPercent;clean[key]=w?{usedPercent:typeof used==='number'&&Number.isFinite(used)?Math.max(0,Math.min(100,used)):null,resetsAt:timestamp(w.resetsAt)}:null;if(clean[key]?.usedPercent!=null)hasUsage=true;}
  if(!hasUsage)return empty('not-reported',candidate.status==='fetching'?'Usage is refreshing. Check again shortly.':'Orca has not reported usage windows for this account.');
@@ -33,10 +33,10 @@ function usageDetails(result,id,verifiedActiveId){
  const stale=!Number.isFinite(ms)||Date.now()-ms>5*60000;
  return {usage:clean,usageStatus:{code:'ready',state:stale?'stale':'ready',message:candidate.status==='fetching'?'Refreshing; showing the last reported usage.':stale?'Showing cached usage. Refresh for the latest values.':'',updatedAt,stale,source:snapshot?'runtime-snapshot':'account-bound'}};
 }
-function publicState(result,verifiedActiveId=null){
+function publicState(result,verifiedActiveId=null,strictProvenance=false){
  if(!result?.claude||!Array.isArray(result.claude.accounts))throw new ToolkitError('The remote account response is unavailable.');
  const active=result.claude.activeAccountId;
- return {activeAccountId:typeof active==='string'?active:null,accounts:result.claude.accounts.filter(a=>typeof a.id==='string').map(a=>({id:a.id,email:maskedEmail(a.email),current:a.id===active,needsSignIn:a.needsSignIn===true,...usageDetails(result,a.id,verifiedActiveId)}))};
+ return {activeAccountId:typeof active==='string'?active:null,accounts:result.claude.accounts.filter(a=>typeof a.id==='string').map(a=>({id:a.id,email:maskedEmail(a.email),current:a.id===active,needsSignIn:a.needsSignIn===true,...usageDetails(result,a.id,verifiedActiveId,strictProvenance)}))};
 }
 class Accounts {
  constructor(runtime,options={}){this.runtime=runtime;this.createClient=options.createClient||(env=>createRemoteClient(runtime,env));this.clients=new Map();this.switching=false;}
@@ -55,6 +55,7 @@ class Accounts {
  }
  async list(settings,refreshUsage=false,identity={}){
   const first=await this.call(settings,'accounts.list',{refreshUsage},identity),id=first?.claude?.activeAccountId,candidate=first?.rateLimits?.claude;
+  if(this.runtime.platform==='darwin')return publicState(first,null,true);
   if(typeof id==='string'&&missingProvenance(candidate)&&candidate?.status==='ok'&&!candidate.error&&snapshotBinding(first,id)){
    const second=await this.call(settings,'accounts.list',{refreshUsage:false},identity);
    return publicState(second,snapshotBinding(second,id)?id:null);

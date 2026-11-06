@@ -16,7 +16,7 @@ const {chromium}=createRequire(path.join(orca,'package.json'))('playwright');
    window.fixture.calls.push(input);if(window.fixture.offline)throw Error('Host disconnected');
    if(input.operation==='list'&&window.fixture.failNextList){window.fixture.failNextList=false;throw Error('Synthetic task refresh timeout');}if(input.operation==='list')return {jobs:[job],enabled:true,recovery:[],defaultFolder:'/tmp/downloads',remoteLocation:{source:'',directory:''}};
    if(input.operation==='pause-all')job.status='paused';
-   if(input.operation==='action'){if(input.action==='pause')job.status='paused';if(input.action==='resume')job.status='downloading';if(input.action==='cancel')job.status='cancelled';if(input.action==='cleanup')job.cleanupWarning=null;}
+   if(input.operation==='action'){if(input.action==='pause')job.status='paused';if(input.action==='resume')job.status='downloading';if(input.action==='cancel')job.status='cancelled';if(input.action==='cleanup')job.cleanupWarning=null;if(input.action==='verify'){job.verificationState='pending';job.verified=false;}}
    if(input.operation==='create'){window.fixture.creates.push(input.requestId);if(window.fixture.failRefreshAfterCreate){window.fixture.failRefreshAfterCreate=false;window.fixture.failNextList=true;}if(localStorage.getItem('drop-create'))throw Error('Synthetic lost create acknowledgement');return {job};}
    return {};
   }};
@@ -31,6 +31,11 @@ const {chromium}=createRequire(path.join(orca,'package.json'))('playwright');
  await page.getByRole('button',{name:'Clear access',exact:true}).click();assert.doesNotMatch(await page.locator('#host-download-jobs').textContent(),/Revocation pending/);
  await page.evaluate(()=>{window.fixture.job.status='verifying';});await page.locator('#host-download-refresh').click();assert.match(await page.locator('#host-download-jobs').textContent(),/Verifying checksum/);
  await page.evaluate(()=>{window.fixture.job.status='complete';window.fixture.job.verified=true;window.fixture.job.bytes=2097152;window.fixture.job.percent=100;window.fixture.job.speed=0;});await page.locator('#host-download-refresh').click();assert.match(await page.locator('#host-download-jobs').textContent(),/Checksum verified/);
+ await page.evaluate(()=>{window.fixture.job.verificationState='pending';window.fixture.job.verified=false;});await page.locator('#host-download-refresh').click();
+ assert.match(await page.locator('#host-download-jobs').textContent(),/checking in background/);assert.equal(await page.getByRole('button',{name:'Use in project…',exact:true}).count(),0);
+ await page.locator('#host-downloads').screenshot({path:'/tmp/toolkit-download-pending-7b15.png'});
+ await page.evaluate(()=>{window.fixture.job.verificationState='failed';});await page.locator('#host-download-refresh').click();assert.match(await page.locator('#host-download-jobs').textContent(),/verification failed/);
+ await page.getByRole('button',{name:'Recheck checksum',exact:true}).click();assert.match(await page.locator('#host-download-jobs').textContent(),/checking in background/);
  await page.evaluate(()=>{window.fixture.offline=true;});await page.waitForFunction(()=>document.getElementById('host-download-create').disabled);
  assert.match(await page.locator('#host-download-error').textContent(),/Host disconnected/);
  await page.evaluate(()=>{window.fixture.offline=false;});await page.locator('#host-download-refresh').click();

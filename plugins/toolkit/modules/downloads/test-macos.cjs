@@ -60,7 +60,7 @@ test('macOS pause/restart rechecks chunk hashes and re-downloads corrupted persi
  const f=engineFixture(t);const row=await f.m.create({source:'/project/resume.bin',folder:f.folder,concurrency:2});
  while(!f.m.jobs.get(row.id).done.length)await sleep(5);await f.m.action(row.id,'pause');const job=f.m.jobs.get(row.id),index=job.done[0];assert.ok(job.chunkHashes[index]);
  await f.m.close();const fd=fs.openSync(job.partial,'r+');fs.writeSync(fd,Buffer.from('X'),0,1,index*job.chunk);fs.closeSync(fd);
- const m=new DownloadManager(f.options);t.after(()=>m.close());assert.equal(m.jobs.get(job.id).status,'paused');const before=f.reads.length;await m.action(job.id,'resume');assert.equal((await settled(m,job.id)).status,'complete');assert.ok(f.reads.slice(before).includes(index*job.chunk));assert.deepEqual(fs.readFileSync(job.destination),f.data);
+ const m=new DownloadManager(f.options);t.after(()=>m.close());await m.ready;assert.equal(m.jobs.get(job.id).status,'paused');const before=f.reads.length;await m.action(job.id,'resume');assert.equal((await settled(m,job.id)).status,'complete');assert.ok(f.reads.slice(before).includes(index*job.chunk));assert.deepEqual(fs.readFileSync(job.destination),f.data);
 });
 test('SHA-256 failure, APFS destination collision, cleanup debt and TCC diagnostics retain safe state',macOnly,async t=>{
  const f=engineFixture(t,1024*1024);f.bad();let row=await f.m.create({source:'/project/bad.bin',folder:f.folder,concurrency:4});let job=await settled(f.m,row.id);assert.equal(job.status,'error');assert.match(job.error,/Checksum/);assert.equal(fs.existsSync(job.destination),false);assert.ok(job.cleanupWarning);
@@ -76,7 +76,7 @@ test('SIGKILL leaves recoverable tasks and stale lock; restart is passive until 
  const row=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('Child timeout')),10000);child.once('message',v=>{clearTimeout(timer);resolve(v);});child.once('error',reject);});
  const exited=new Promise(resolve=>child.once('exit',resolve));child.kill('SIGKILL');await exited;
  let reads=0;const data=Buffer.alloc(8*1024*1024,37),m=new DownloadManager({dataDir:r.downloadsDir,runtime:r,transport:{async read(job,offset,length,signal,onData){reads++;assert.equal(offset,4*1024*1024);onData(data.subarray(offset,offset+length),0);},async cleanup(){}}});t.after(()=>m.close());
- assert.equal(reads,0);assert.equal(m.jobs.get(row.id).status,'paused');await m.action(row.id,'resume');assert.equal((await settled(m,row.id)).status,'complete');assert.equal(reads,1);
+ await m.ready;assert.equal(reads,0);assert.equal(m.jobs.get(row.id).status,'paused');await m.action(row.id,'resume');assert.equal((await settled(m,row.id)).status,'complete');assert.equal(reads,1);
 });
 test('remote browser rejects traversal, sibling prefixes, symlinks, unconfirmed and outside replies',macOnly,async()=>{
  const calls=[];let outside=false,confirmed=true;const client={isRemote:true,async call(method,{path:directory}){calls.push(directory);assert.equal(method,'files.browseServerDir');return {ok:confirmed,_meta:{runtimeId:'mock'},result:{pathFlavor:'posix',resolvedPath:outside?'/etc':directory,entries:[{name:'link',isDirectory:true,isSymlink:true},{name:'safe',isDirectory:true,isSymlink:false},{name:'中文.bin',isDirectory:false,isSymlink:false}]}};}};
@@ -107,7 +107,7 @@ test('private saved metadata and partial symlinks fail closed, disk-full allocat
  const f=engineFixture(t,1024),truncate=fs.ftruncateSync;let full=true;
  t.mock.method(fs,'ftruncateSync',(...args)=>{if(full){full=false;throw Object.assign(Error('mock disk full'),{code:'ENOSPC'});}return truncate(...args);});
  const row=await f.m.create({source:'/project/space.bin',folder:f.folder});let job=await settled(f.m,row.id);assert.match(job.error,/Not enough space/);assert.equal(job.sha256,undefined);await f.m.action(job.id,'resume');assert.equal((await settled(f.m,job.id)).status,'complete');
- await f.m.close();const meta=path.join(f.r.downloadsDir,'jobs',job.id+'.json');fs.chmodSync(meta,0o644);assert.throws(()=>new DownloadManager(f.options),/unsafe/);fs.chmodSync(meta,0o600);
+ await f.m.close();const meta=path.join(f.r.downloadsDir,'jobs',job.id+'.json');fs.chmodSync(meta,0o644);const invalid=new DownloadManager(f.options);await assert.rejects(invalid.ready,/unsafe/);await invalid.close();fs.chmodSync(meta,0o600);
  const saved=JSON.parse(fs.readFileSync(meta));saved.status='paused';saved.verified=false;const target=path.join(f.root,'untouched');fs.writeFileSync(target,'KEEP');fs.symlinkSync(target,saved.partial);fs.writeFileSync(meta,JSON.stringify(saved));
  const m=new DownloadManager(f.options);t.after(()=>m.close());await m.action(job.id,'resume');job=await settled(m,job.id);assert.equal(job.status,'error');assert.equal(fs.readFileSync(target,'utf8'),'KEEP');
 });
@@ -133,8 +133,10 @@ test('completed files are rehashed on restart even when durable Host state says 
  for(const changed of [false,true]){
   if(changed)fs.writeFileSync(job.destination,Buffer.alloc(1024,38));
   const restarted=new DownloadManager(f.options);await restarted.ready;
+  assert.equal(restarted.list()[0].verified,false);assert.equal(restarted.list()[0].verificationState,'pending');
+  await restarted.verificationDone;
   assert.equal(restarted.list()[0].verified,!changed);
-  if(changed)assert.match(restarted.list()[0].error,/checksum verification failed/);
+  if(changed)assert.match(restarted.list()[0].error,/retry checksum verification/);
   await restarted.close();
  }
 });
@@ -163,4 +165,32 @@ test('disk full during a range fails with a recoverable task and no published fi
  const f=engineFixture(t,1024);f.options.transport.read=async()=>{throw Object.assign(Error('fixture storage full'),{code:'ENOSPC'});};
  const row=await f.m.create({source:'/project/full.bin',folder:f.folder});const job=await settled(f.m,row.id);
  assert.equal(job.status,'error');assert.match(job.error,/Not enough space/);assert.equal(fs.existsSync(job.destination),false);assert.ok(fs.existsSync(job.partial));
+});
+
+test('background verification resets persisted trust, survives interruption and detects equal metadata tampering',macOnly,async t=>{
+ const f=engineFixture(t,8*1024*1024),row=await f.m.create({source:'/project/background.bin',folder:f.folder});
+ const job=await settled(f.m,row.id);await f.m.close();
+ const interrupted=new DownloadManager(f.options);await interrupted.ready;
+ assert.equal(interrupted.list()[0].verificationState,'pending');assert.equal(interrupted.list()[0].verified,false);
+ await interrupted.close();
+ const reopened=new DownloadManager(f.options);t.after(()=>reopened.close());await reopened.ready;await reopened.verificationDone;
+ assert.equal(reopened.list()[0].verificationState,'verified');
+ const stat=fs.statSync(job.destination);fs.writeFileSync(job.destination,Buffer.alloc(job.size,99));fs.utimesSync(job.destination,stat.atime,stat.mtime);
+ await reopened.action(job.id,'verify');assert.equal(reopened.list()[0].verified,false);await reopened.verificationDone;
+ assert.equal(reopened.list()[0].verificationState,'failed');assert.equal(fs.statSync(job.destination).size,job.size);
+ fs.writeFileSync(job.destination,f.data);await reopened.action(job.id,'verify');await reopened.verificationDone;
+ assert.equal(reopened.list()[0].verificationState,'verified');
+ fs.unlinkSync(job.destination);await reopened.action(job.id,'verify');await reopened.verificationDone;
+ assert.equal(reopened.list()[0].verificationState,'failed');assert.equal(reopened.list()[0].verified,false);
+});
+
+test('a retry ID attached to an unfinished task remains idempotent after completion and restart',macOnly,async t=>{
+ const f=engineFixture(t,1024*1024);f.options.hostTasks={async create(){},async transition(){}};
+ const input={source:'/project/replay.bin',folder:f.folder,concurrency:2},requestId=crypto.randomUUID();
+ const first=await f.m.create({...input,requestId:crypto.randomUUID()});await f.m.action(first.id,'pause');
+ assert.equal((await f.m.create({...input,requestId})).id,first.id);
+ await f.m.action(first.id,'resume');assert.equal((await settled(f.m,first.id)).status,'complete');await f.m.close();
+ const restored=new DownloadManager(f.options);t.after(()=>restored.close());
+ assert.equal((await restored.create({...input,requestId})).id,first.id);assert.equal(restored.list().length,1);
+ await assert.rejects(restored.create({...input,source:'/project/different.bin',requestId}),/conflict/);
 });

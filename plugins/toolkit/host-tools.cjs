@@ -5,18 +5,15 @@ const {MacGpu}=require('./modules/gpu-macos.cjs');
 module.exports={create({runtime,readSettings,dataDir}){
  const accounts=new Accounts(runtime),gpu=new MacGpu(runtime);
  const workbench=require('./host-workbench.cjs').create(runtime);
- let snapshot=null,binding='',closed=false;
+ let closed=false;
  return {
-  close(){closed=true;workbench.close();accounts.clients.clear();snapshot=null;},
+  close(){closed=true;workbench.close();accounts.clients.clear();},
   async call(command){
    if(closed)throw Error('Toolkit session closed');
    const settings=await readSettings(),key=JSON.stringify(settings.accounts);
-   if(key!==binding){snapshot=null;binding=key;}
    const current=async()=>!closed&&key===JSON.stringify((await readSettings()).accounts);
    if(command.operation.startsWith('accounts')){
     if(!settings.accounts.enabled)throw Error('Accounts are disabled. Enable them in Host settings.');
-    if(command.operation==='accounts'&&snapshot)return snapshot;
-    try{
      const preferences=new AccountPreferences(dataDir,{privateFiles:true});
      let result;
      if(command.operation==='accounts-select'){
@@ -31,8 +28,7 @@ module.exports={create({runtime,readSettings,dataDir}){
       }
      }
      if(!await current())throw Error('Remote connection changed. Refresh accounts.');
-     snapshot=preferences.apply(settings.accounts.environment,result);return snapshot;
-    }catch(error){snapshot=null;throw error;}
+     return preferences.apply(settings.accounts.environment,result);
    }
    if(!settings.gpu.enabled)throw Error('GPU tools are disabled. Enable them in Host settings.');
    if(command.operation==='workbench')return workbench.call(command.command);

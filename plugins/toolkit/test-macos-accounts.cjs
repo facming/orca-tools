@@ -167,3 +167,15 @@ test('settings change during UI refresh discards the previous environment respon
  const refresh=nodes.refresh.onclick();listeners['toolkit-settings-changed']();release();await refresh;
  assert.match(nodes.message.text,/Settings changed/);assert.ok(!nodes.accounts.text.includes('example.invalid'));
 });
+
+test('macOS rejects unbound cached usage even when repeated runtime target snapshots agree',async t=>{
+ const f=fixture();t.after(()=>f.close());
+ const state=snapshot();state.claude.activeAccountIdsByRuntime={host:'a'};state.claude.accounts[0].managedAuthRuntime='host';state.rateLimits.claudeTarget={runtime:'host',wslDistro:null};
+ delete state.rateLimits.claude.usageMetadata.authProvenance;delete state.rateLimits.inactiveClaudeAccounts[0].rateLimits.usageMetadata.authProvenance;
+ f.value=state;const accounts=new Accounts(f.runtime);
+ for(let i=0;i<2;i++){const result=await accounts.list({environment:'fixture'});assert.equal(result.accounts[0].usage,null);assert.equal(result.accounts[1].usage,null);assert.equal(result.accounts[0].usageStatus.code,'unverified-account');}
+ state.rateLimits.claude.usageMetadata.authProvenance='managed:a';
+ assert.equal((await accounts.list({environment:'fixture'})).accounts[0].usage.session.usedPercent,24);
+ state.claude.activeAccountId='b';
+ assert.equal((await accounts.list({environment:'fixture'})).accounts[1].usage,null);
+});

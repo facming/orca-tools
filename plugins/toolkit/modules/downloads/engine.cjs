@@ -3,6 +3,7 @@ const {ToolkitError, publicMessage} = require('../../platform/errors.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const {setTimeout: delay, setImmediate: yieldIO} = require('node:timers/promises');
 const {SshTransport} = require('./transport.cjs');
 
 class Semaphore {
@@ -49,23 +50,32 @@ class DownloadManager {
     if(this.privateFiles){privateDirectory(this.root);privateDirectory(path.join(this.root,'jobs'));}
     else fs.mkdirSync(path.join(this.root, 'jobs'), {recursive: true});
     if(this.privateFiles)this.releaseLock=acquireLock(this.root);
-    try { for (const name of fs.readdirSync(path.join(this.root, 'jobs'))) {
+    this.verificationController=new AbortController();
+    this.verificationDone=Promise.resolve();
+    this.ready=this.load();
+    this.hostRevoked=()=>{this.close().catch(()=>{});};
+    options.hostTasks?.signal?.addEventListener('abort',this.hostRevoked,{once:true});
+  }
+  async load(){
+    try { for (const name of (this.privateFiles?await fs.promises.readdir(path.join(this.root, 'jobs')):fs.readdirSync(path.join(this.root, 'jobs')))) {
       if (!/^[a-f0-9]{32}\.json$/.test(name)) continue;
       try {
         if(this.privateFiles)privatePath(path.join(this.root,'jobs',name));
-        const job = JSON.parse(fs.readFileSync(path.join(this.root, 'jobs', name), 'utf8'));
-        if(this.privateFiles&&(!job||job.id+'.json'!==name||!validRemote(job.source)||!path.isAbsolute(job.destination)||!path.isAbsolute(job.partial)||path.dirname(job.partial)!==path.dirname(job.destination)||!path.basename(job.partial).endsWith('.'+job.id+'.part')||!Number.isInteger(job.concurrency)||job.concurrency<1||job.concurrency>16||!Number.isSafeInteger(job.size)||job.size<0||!Number.isSafeInteger(job.chunk)||job.chunk<1||job.chunk>8*1024*1024||(job.sha256&&!/^[a-f0-9]{64}$/.test(job.sha256))||!Array.isArray(job.done)||job.done.some(i=>!Number.isInteger(i)||i<0||i>=Math.ceil(job.size/job.chunk))))throw Error();
+        const file=path.join(this.root,'jobs',name);
+        const job = JSON.parse(this.privateFiles?await fs.promises.readFile(file,'utf8'):fs.readFileSync(file,'utf8'));
+        if(this.privateFiles&&(!job||job.id+'.json'!==name||!validRemote(job.source)||!path.isAbsolute(job.destination)||!path.isAbsolute(job.partial)||path.dirname(job.partial)!==path.dirname(job.destination)||!path.basename(job.partial).endsWith('.'+job.id+'.part')||!Number.isInteger(job.concurrency)||job.concurrency<1||job.concurrency>16||!Number.isSafeInteger(job.size)||job.size<0||!Number.isSafeInteger(job.chunk)||job.chunk<1||job.chunk>8*1024*1024||(job.sha256&&!/^[a-f0-9]{64}$/.test(job.sha256))||(job.requestAliases!=null&&(!Array.isArray(job.requestAliases)||job.requestAliases.length>256||job.requestAliases.some(id=>typeof id!=='string'||!/^[-a-f0-9]{36}$/.test(id))))||!Array.isArray(job.done)||job.done.some(i=>!Number.isInteger(i)||i<0||i>=Math.ceil(job.size/job.chunk))))throw Error();
         if(this.privateFiles&&job.protocol!==3){job.authorizationState='legacy-manual';job.cleanupWarning='Legacy task: manual cleanup required.';}
         if(job.status==='complete'&&job.cleanupWarning)this.options.onConnection?.('error');
         if (job.error) job.error = 'Previous download failed. Check the destination and remote connection before retrying.';
         if (!['complete','cancelled'].includes(job.status)) job.status = 'paused';
+        job.verified=false;job.verificationState=job.status==='complete'?'pending':null;
         this.jobs.set(job.id, job);
       } catch {if(this.privateFiles)throw new ToolkitError('Saved download state is invalid or unsafe. Inspect it before continuing.');}
     }
-    } catch(error) { this.releaseLock?.(); throw error; }
-    this.ready=this.reconcile();
-    this.hostRevoked=()=>{this.close().catch(()=>{});};
-    options.hostTasks?.signal?.addEventListener('abort',this.hostRevoked,{once:true});
+    } catch(error) { this.releaseLock?.(); this.releaseLock=null; throw error; }
+    await this.reconcile();
+    if(this.privateFiles)this.queueVerification();
+    else await this.verifyHistory();
   }
   target(){return Object.fromEntries(['environment','sshHost','sshUser','sshPort'].map(key=>[key,this.options[key]]));}
   async reconcile(){
@@ -74,9 +84,10 @@ class DownloadManager {
       for(const record of this.recovery){
         const job=this.jobs.get(record.id);if(!job)continue;
         job.hostState=record.state;job.recoveryError=record.reason||null;
-        if(record.reason){job.status='review';job.verified=false;job.cleanupWarning=record.reason;continue;}
+        if(record.reason){job.status='review';job.verified=false;job.verificationState=null;job.cleanupWarning=record.reason;continue;}
         job.hostIntent=false;job.verified=false;
         job.status=['complete','cancelled'].includes(record.state)?record.state:'paused';
+        job.verificationState=job.status==='complete'?'pending':null;
         // JSON flags never establish revocation; cleanup re-verifies the signed envelope.
         job.cleanupWarning='Transfer access cleanup requires verification; use Clear access.';
         this.save(job);
@@ -86,23 +97,41 @@ class DownloadManager {
         }
       }
     }
+  }
+  queueVerification(){
+    if(this.verificationRunning||this.closed)return;
+    this.verificationRunning=true;
+    this.verificationDone=this.verifyHistory().finally(()=>{this.verificationRunning=false;if([...this.jobs.values()].some(job=>job.status==='complete'&&job.verificationState==='pending'))this.queueVerification();});
+  }
+  async verifyHistory(){
+    const signal=this.verificationController.signal;
     for(const job of this.jobs.values()){
-      if(job.status!=='complete')continue;
+      if(signal.aborted)break;
+      if(job.status!=='complete'||job.verificationState!=='pending')continue;
       job.verified=false;
-      try{await this.verifyPublished(job);job.verified=true;job.error=null;}
-      catch{job.error='Downloaded file is missing, changed or unreadable. Check the destination; checksum verification failed.';}
-      this.save(job);
+      try{await this.verifyPublished(job,signal);if(signal.aborted)break;job.verificationState='verified';job.verified=true;job.error=null;}
+      catch{if(signal.aborted)break;job.verificationState='failed';job.error='Downloaded file is missing, changed or unreadable. Check the destination and retry checksum verification. Existing files are retained.';}
+      try{this.save(job);}catch{job.verified=false;job.verificationState='failed';job.error='Verification result could not be saved. Check local storage and retry verification.';}
+      await yieldIO();
     }
   }
-  async verifyPublished(job){
+  async verifyPublished(job,signal){
     const handle=await fs.promises.open(job.destination,fs.constants.O_RDONLY|fs.constants.O_NOFOLLOW);
     try{
       const before=await handle.stat();
       if(!before.isFile()||before.size!==job.size||!job.sha256)throw Error('Invalid downloaded file');
-      const digest=crypto.createHash('sha256');
-      for await(const block of handle.createReadStream({autoClose:false}))digest.update(block);
-      const after=await handle.stat();
-      if(digest.digest('hex')!==job.sha256||after.size!==before.size||after.mtimeMs!==before.mtimeMs)throw Error('Downloaded file changed');
+      const digest=crypto.createHash('sha256'),block=Buffer.alloc(256*1024);
+      let position=0;
+      // One historical reader, 256 KiB per 8 ms: at most 31.25 MiB/s, without read-ahead.
+      while(position<before.size){
+        if(signal?.aborted)throw Error('Verification interrupted');
+        const {bytesRead}=await handle.read(block,0,Math.min(block.length,before.size-position),position);
+        if(!bytesRead)throw Error('Downloaded file truncated');
+        digest.update(block.subarray(0,bytesRead));position+=bytesRead;
+        if(this.privateFiles)await delay(8,undefined,{signal});
+      }
+      const after=await handle.stat(),published=await fs.promises.lstat(job.destination);
+      if(digest.digest('hex')!==job.sha256||after.size!==before.size||after.mtimeMs!==before.mtimeMs||after.ctimeMs!==before.ctimeMs||!published.isFile()||published.dev!==after.dev||published.ino!==after.ino)throw Error('Downloaded file changed');
     }finally{await handle.close();}
   }
   save(job) { const file=path.join(this.root,'jobs',job.id+'.json');if(this.privateFiles&&fs.existsSync(file))privatePath(file);writeJson(file,job); }
@@ -115,16 +144,22 @@ class DownloadManager {
       return {id:job.id, source:job.source, name:job.name, destination:job.destination, status:job.status,
         size:job.size || 0, bytes, speed, percent:job.status==='complete'?100:job.size?Math.min(100,bytes/job.size*100):0,
         concurrency:job.concurrency, connections:live?.ranges.size||0, retries:job.retries||0,
-        error:job.error||null, verified:job.verified||false, cleanupWarning:job.cleanupWarning||null,authorizationState:job.authorizationState||null,recoveryError:job.recoveryError||null};
+        error:job.error||null, verified:job.verified===true&&job.verificationState==='verified', verificationState:job.verificationState||null, cleanupWarning:job.cleanupWarning||null,authorizationState:job.authorizationState||null,recoveryError:job.recoveryError||null};
     });
   }
   async create({source, folder, concurrency=12, requestId}) {
     await this.ready;
     if (this.closed) throw new ToolkitError('Download manager is closing');
     if(requestId&&this.options.hostTasks){
-      const existing=[...this.jobs.values()].find(job=>job.requestId===requestId)||[...this.jobs.values()].find(job=>!['complete','cancelled','review'].includes(job.status)&&job.source===source&&path.dirname(job.destination)===path.resolve(folder)&&job.concurrency===concurrency);
+      const existing=[...this.jobs.values()].find(job=>job.requestId===requestId||job.requestAliases?.includes(requestId))||[...this.jobs.values()].find(job=>!['complete','cancelled','review'].includes(job.status)&&job.source===source&&path.dirname(job.destination)===path.resolve(folder)&&job.concurrency===concurrency);
       if(existing){
         if((existing.target&&JSON.stringify(existing.target)!==JSON.stringify(this.target()))||existing.source!==source||path.dirname(existing.destination)!==path.resolve(folder)||existing.concurrency!==concurrency)throw new ToolkitError('Download request_id conflict');
+        if(existing.requestId!==requestId&&!existing.requestAliases?.includes(requestId)){
+          const previous=existing.requestAliases;
+          if((previous?.length||0)>=256)throw new ToolkitError('Too many retry identities for this download. Refresh tasks and use the existing task.');
+          existing.requestAliases=[...(previous||[]),requestId];
+          try{this.save(existing);}catch(error){existing.requestAliases=previous;throw error;}
+        }
         if(existing.hostIntent){await this.options.hostTasks.create(this.target(),existing.id);try{existing.hostIntent=false;this.save(existing);}catch(error){existing.hostIntent=true;throw error;}await this.start(existing);}
         return this.list().find(job=>job.id===existing.id);
       }
@@ -234,15 +269,20 @@ class DownloadManager {
     fs.unlinkSync(job.partial);await this.complete(job);
   }
   async complete(job){
-    job.verified=true;job.status='complete';delete job.publishing;this.save(job);
+    job.verified=true;job.verificationState='verified';job.status='complete';delete job.publishing;this.save(job);
     try{await this.options.hostTasks?.transition(job.id,'complete');await this.transport.cleanup(job);job.cleanupWarning=null;this.save(job);}catch{job.cleanupWarning='Transfer access cleanup pending; use Clear access.';this.save(job);}
     await this.options.onComplete?.(job).catch(()=>{});
   }
   async action(id,action) {
     await this.ready;
     const job=this.jobs.get(id);if(!job)throw new ToolkitError('Download not found');
+    if(this.closed&&action!=='pause')throw new ToolkitError('Download manager is closing');
     if(job.recoveryError)throw new ToolkitError(job.recoveryError);
-    if(action==='pause'){
+    if(action==='verify'){
+      if(job.status!=='complete')throw new ToolkitError('Only completed files can be rechecked');
+      if(job.verificationState!=='pending'){job.verified=false;job.verificationState='pending';job.error=null;this.save(job);}
+      this.queueVerification();
+    }else if(action==='pause'){
       const run=this.runs.get(id);if(run){run.controller.abort();await run.promise;}
     }else if(action==='resume'){
       if(!['paused','error'].includes(job.status))throw new ToolkitError('This download cannot be resumed');
@@ -272,6 +312,11 @@ class DownloadManager {
     }
   }
   async pauseAll(){await Promise.all([...this.runs.keys()].map(id=>this.action(id,'pause')));}
-  async close(){this.closed=true;this.options.hostTasks?.signal?.removeEventListener('abort',this.hostRevoked);await this.pauseAll();if(this.releaseLock){this.releaseLock();this.releaseLock=null;}}
+  async close(){
+    if(this.closing)return this.closing;
+    this.closed=true;this.verificationController.abort();this.options.hostTasks?.signal?.removeEventListener('abort',this.hostRevoked);
+    this.closing=(async()=>{await this.ready.catch(()=>{});await this.pauseAll();await this.verificationDone;})().finally(()=>{this.releaseLock?.();this.releaseLock=null;});
+    return this.closing;
+  }
 }
 module.exports={DownloadManager,Semaphore,safeName,chunkSize};

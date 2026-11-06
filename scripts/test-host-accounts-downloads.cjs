@@ -82,7 +82,7 @@ finally:s.close()`;
  await electron.evaluate(()=>{global.fixture.offline=true;});await page.locator('#host-accounts #refresh').click();await page.waitForFunction(()=>document.querySelector('#host-accounts #message').textContent.includes('disconnected'));
  assert.equal(await page.locator('#host-accounts .card').count(),0);
  await electron.evaluate(()=>{global.fixture.offline=false;});await page.locator('#host-accounts #refresh').click();await page.waitForFunction(()=>document.querySelectorAll('#host-accounts .card').length===2);
- await page.locator('#host-accounts').screenshot({path:'/tmp/toolkit-accounts-7b14.png'});
+ await page.locator('#host-accounts').screenshot({path:'/tmp/toolkit-accounts-7b15.png'});
  await page.getByRole('link',{name:'Downloads',exact:true}).click();
  await page.locator('#host-download-remote').click();await page.getByRole('button',{name:'Folder: /project',exact:true}).click();await page.getByRole('button',{name:'File: data.bin',exact:true}).click();
  assert.equal(await page.locator('#host-download-source').inputValue(),'/project/data.bin');
@@ -103,12 +103,20 @@ finally:s.close()`;
  // A new renderer request ID for the same unfinished file still returns one durable task.
  const replay=await call({operation:'create',requestId:require('node:crypto').randomUUID(),source:large,folder,concurrency:2});assert.equal(replay.job.id,big.id);
  await call({operation:'action',id:big.id,action:'resume'});
+ const requestId=require('node:crypto').randomUUID(),pendingInput={operation:'create',source:large,folder,concurrency:2},targetKey=(await call({operation:'list'})).targetKey;
+ await page.evaluate(({requestId,pendingInput,targetKey})=>localStorage.setItem('toolkit-pending-downloads',JSON.stringify({[JSON.stringify([targetKey,pendingInput])]:requestId})),{requestId,pendingInput,targetKey});
+ assert.equal((await call({...pendingInput,requestId})).job.id,big.id);
  // Restart the actual Electron process with the same isolated profile and authority databases.
  await electron.close();electron=await _electron.launch({executablePath:createRequire(path.join(orca,'package.json'))('electron'),args:[fixture],env:{...process.env,ORCA_BACKGROUND_LAUNCH:'1'}});
  const restored=await electron.firstWindow();restored.setDefaultTimeout(20000);await restored.setViewportSize({width:1000,height:900});
  await restored.waitForFunction(()=>!!window.orcaToolkitDownloads);
  const invoke=input=>restored.evaluate(input=>window.orcaToolkitDownloads.call(input),input);
- let saved=await invoke({operation:'list'});assert.equal(saved.jobs.find(j=>j.id===big.id).status,'paused');assert.equal(saved.jobs.find(j=>j.id===one.id).verified,true);
+ let saved=await invoke({operation:'list'});assert.equal(saved.jobs.find(j=>j.id===big.id).status,'paused');for(let i=0;i<100&&!saved.jobs.find(j=>j.id===one.id).verified;i++){await new Promise(r=>setTimeout(r,20));saved=await invoke({operation:'list'});}assert.equal(saved.jobs.find(j=>j.id===one.id).verificationState,'verified');
+ const durableRequests=await restored.evaluate(()=>JSON.parse(localStorage.getItem('toolkit-pending-downloads')));assert.equal(durableRequests[JSON.stringify([targetKey,pendingInput])],requestId);
+ assert.equal((await invoke({...pendingInput,requestId})).job.id,big.id);
+ await invoke({operation:'action',id:one.id,action:'verify'});
+ for(let i=0;i<100;i++){const row=(await invoke({operation:'list'})).jobs.find(j=>j.id===one.id);if(row.verificationState==='verified')break;await new Promise(r=>setTimeout(r,20));}
+ assert.equal((await invoke({operation:'list'})).jobs.find(j=>j.id===one.id).verificationState,'verified');
  const restoredAccounts=await restored.evaluate(()=>window.orcaToolkitTools.call({operation:'accounts'}));assert.equal(restoredAccounts.activeAccountId,'b');assert.equal(restoredAccounts.accounts[0].disabled,true);
  await invoke({operation:'action',id:big.id,action:'resume'});
  for(let i=0;i<400;i++){saved=await invoke({operation:'list'});if(saved.jobs.find(j=>j.id===big.id).status==='complete')break;await new Promise(r=>setTimeout(r,100));}
@@ -122,7 +130,7 @@ finally:s.close()`;
  assert.ok((await invoke({operation:'list'})).jobs.find(j=>j.id===cancel.job.id).cleanupWarning);
  await electron.evaluate(()=>{global.fixture.cleanupFailure=false;});await invoke({operation:'action',id:cancel.job.id,action:'cleanup'});
  const cleaned=(await invoke({operation:'list'})).jobs.find(j=>j.id===cancel.job.id);assert.equal(cleaned.status,'cancelled');assert.equal(cleaned.cleanupWarning,null);
- await restored.getByRole('link',{name:'Downloads',exact:true}).click();await restored.locator('#host-download-refresh').click();await restored.locator('#host-downloads').screenshot({path:'/tmp/toolkit-downloads-7b14.png'});
+ await restored.getByRole('link',{name:'Downloads',exact:true}).click();await restored.locator('#host-download-refresh').click();await restored.locator('#host-downloads').screenshot({path:'/tmp/toolkit-downloads-7b15.png'});
  assert.equal(await electron.evaluate(()=>global.fixture.panel.isVisible()),false);
  console.log('PASS: real hidden macOS Electron/main/production preload, account masking/usage/switch/disable/enable/disconnect/reconnect/restart; remote browse fixture; small and 32 MiB files, progress/pause/resume/retry/restart/dedup/cancel/cleanup/folder reveal routing; real SSHSIG, signed receipts, SHA-256, filesystem and both SQLite authorities. Accounts, remote listing, byte transport, service identity and dialogs are synthetic. No VPS or production credentials.');
 })().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>{if(electron){const kill=setTimeout(()=>electron.process().kill(),5000);try{await electron.close();}finally{clearTimeout(kill);}}fs.rmSync(root,{recursive:true,force:true});});

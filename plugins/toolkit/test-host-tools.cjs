@@ -6,7 +6,7 @@ function fixture(t){
  let active='a',fail=false,onList=()=>{},settings={accounts:{enabled:true,environment:'fixture'},gpu:{enabled:true}};const calls=[];
  const runtime={loadSdk:()=>({RuntimeClient:class{constructor(){this.isRemote=true;}async call(method,params){calls.push(method);if(fail)throw {code:'disconnected'};if(method==='accounts.selectClaude')active=params.accountId;else onList();return {ok:true,_meta:{runtimeId:'fixture'},result:{claude:{activeAccountId:active,accounts:[{id:'a',email:'a@example.test'},{id:'b',email:'b@example.test'}]}}};}}})};
  const service=create({runtime,dataDir,readSettings:async()=>structuredClone(settings)});t.after(()=>service.close());
- return {service,calls,settings,set fail(v){fail=v;},set onList(v){onList=v;}};
+ return {service,calls,settings,set active(v){active=v;},set fail(v){fail=v;},set onList(v){onList=v;}};
 }
 test('Host accounts restore selection, confirm switches, persist disable preferences and recover failed snapshots',async t=>{
  const f=fixture(t),call=x=>f.service.call(x);
@@ -25,4 +25,14 @@ test('changed settings during remote preflight deny switching and revoked servic
  await assert.rejects(f.service.call({operation:'accounts-select',accountId:'b',expectedActiveAccountId:'a'}),/connection changed/);
  assert.equal(f.calls.includes('accounts.selectClaude'),false);
  f.service.close();await assert.rejects(f.service.call({operation:'accounts-refresh'}),/closed/);
+});
+
+test('passive Host reads observe external account changes and current-account disable remains local',async t=>{
+ const f=fixture(t),call=input=>f.service.call(input);
+ assert.equal((await call({operation:'accounts'})).activeAccountId,'a');
+ await call({operation:'accounts-disable',accountId:'a',disabled:true});
+ let state=await call({operation:'accounts'});assert.equal(state.activeAccountId,'a');assert.equal(state.accounts[0].disabled,true);
+ f.active='b';assert.equal((await call({operation:'accounts'})).activeAccountId,'b');
+ f.fail=true;
+ await assert.rejects(call({operation:'accounts'}),/disconnected/);
 });
