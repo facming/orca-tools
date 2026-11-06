@@ -334,3 +334,6 @@ Toolkit 分别显示 ComfyUI/Godot/Blender 状态。Blender available/running �
 **非沙箱边界不变：** C#、Editor 插件、import callbacks、Play Mode 拥有登录用户的文件与网络权限；白名单扩展不能约束可信代码主动访问系统。进程组不等价 Windows Job Objects，脱离 session 的后代以及 Bridge 被 SIGKILL 后的遗留需人工处理。未知任务不承诺可安全重试。私有 HOME 不等价操作系统 Preferences 隔离，实际 Unity/许可行为必须在专用账户或副本验证。
 
 本轮只有 Mock Editor/Pipeline、合成 Mach-O/PNG/场景、临时项目、真实回环 HTTP 和 Python/Node 校验。**未编译或运行真实 Unity C# 扩展，未验证真实 Editor/Metal。** 人工批准后须验证：准确 bundle metadata/版本及本地许可、扩展编译/domain reload、全部 Editor API、相对路径 SaveScene 和恢复暂存、Game View 的异步 PNG、URP/HDRP 和 Metal、超时/取消/退出码、TCC/Gatekeeper/Preferences、外部进程不受影响，以及 VPS MCP 链路。失败时停止，不降级到鼠标键盘、shell 或 C# eval。
+
+
+阶段 7B-8 增量：[Host configuration / task ownership 实施与边界](toolkit-host-7b8.md)。RELEASE BLOCKED 继续保留。

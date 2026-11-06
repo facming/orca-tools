@@ -1,0 +1,120 @@
+Stage 7B-8 validation — 2026-11-06 Asia/Shanghai
+RELEASE BLOCKED. Tests use disposable directories and databases only.
+Orca base: 22e9f7887db356140b5b478ca893447d6c71c92e
+Toolkit base: 4485add94457a7eb57fd087a9d1797f943e283b9
+Orca runtime pin: Node 24.22.1; pnpm 12.14.0.
+
+Identity classes:
+- SYNTHETIC: VM/headless Chromium Host binding, main frame/context tests,
+  real ordinary malicious plugin-worker isolation; synthetic download bytes/cleanup.
+- TEMPORARY SIGNING: ad-hoc native C caller and per-test Node CDHash allowlist;
+  actual socketpair -> FD3 -> SCM_RIGHTS -> dual Security.framework -> SQLite.
+  Staged worker-node + addon signed ad-hoc; closed manifest checked after signing.
+- PRODUCTION: NOT RUN. No Developer ID Host, no actual cross-UID service E2E,
+  no notarization/staple, no x64/Rosetta, no Windows hardware acceptance.
+  Generic Node/Electron is NOT enrolled in production.
+
+New behavioral coverage: copied task handle rejection, owner/epoch/revision checks,
+create/running/pause/resume/complete/cancel/verified release through existing engine,
+concurrent target patch versus task creation, old database inventory quarantine,
+service restart, restore epoch changes, lease-release cannot bypass Host records,
+offline recovery quarantines old empty backup despite newer active tasks,
+approved exact restore retry after epoch change, post-confirmation recheck,
+unknown/revoked session retains lease, existing timeout/abnormal-exit/FD regressions.
+
+Rendered fixture: headless Chromium, 1000x900 viewport; no production window opened.
+Observed screenshot: /tmp/toolkit-host-panel-7b8.png (local temporary evidence).
+Orca-specific $electron skill unavailable, so real Electron/native-dialog acceptance
+is NOT claimed. No CUA/visible app launch used.
+
+Production Controller/download entry point is NOT switched to Host engine yet.
+Ordinary workers receive no lifecycle adapter and remain host-required.
+No production install, real config migration, VPS access, main/upstream change or merge.
+
+== Toolkit Node (103 pass / 1 Windows-only skip) ==
+  ---
+  duration_ms: 82.385208
+  ...
+1..104
+# tests 104
+# suites 0
+# pass 103
+# fail 0
+# cancelled 0
+# skipped 1
+# todo 0
+# duration_ms 14899.81575
+
+== Configuration/native (23 pass; temporary identities) ==
+........../Users/apple/Documents/ChatGPT/orca-tools/plugins/toolkit/config-service/ipc.py:116: RuntimeWarning: received malformed or improperly-truncated ancillary data
+  data, ancillary, flags, _ = sock.recvmsg(1, socket.CMSG_SPACE(16 * fds.itemsize))
+.............
+----------------------------------------------------------------------
+Ran 23 tests in 41.489s
+
+OK
+PASS: explicit in-process socketpair -> fd 3 -> SCM_RIGHTS -> kernel identity -> async reply
+PASS: main-owned handles + real service task records + existing download engine (synthetic transfer/cleanup); restore fencing, unknown lease retained
+PASS: SYNTHETIC identity; main authority -> actual socketpair/FD3/SCM_RIGHTS/Security.framework/SQLite; concurrency, revoke, reload, abnormal exit, timeout, FD lifetime
+PASS: Toolkit command client (HTTP denied) -> synthetic native Host -> Bridge -> signed peers -> SQLite; migration, concurrent windows, conflict, restore/retry, unauthorized, no fallback
+PASS: command reports native service offline
+
+== Headless Chromium (synthetic Host binding) ==
+PASS: headless Chromium 1000x900, synthetic Host + real disposable SQLite: preview/import, settings patch, exact unknown integer, backup/restore, leased target disabled
+
+== Installer tests (2 pass) ==
+..
+----------------------------------------------------------------------
+Ran 2 tests in 0.020s
+
+OK
+
+== Orca focused tests (70 pass / 1 platform skip) ==
+
+ RUN  v5.0.5 /Users/apple/Documents/ChatGPT/orca
+
+
+ Test Files  7 passed (7)
+      Tests  70 passed | 1 skipped (71)
+   Start at  17:03:09
+   Duration  8.62s (tests 90%, import 5%, transform 4%, setup 1%)
+
+
+== Temporary ad-hoc nested signing / independent worker ==
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/apple/Documents/ChatGPT/orca/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+Staged Toolkit Host. RELEASE BLOCKED: seal hashes must be regenerated after nested signing; production enrollment remains mandatory.
+/tmp/orca-stage-7b8-final/toolkit-host/worker-node: replacing existing signature
+/tmp/orca-stage-7b8-final/toolkit-host/socketpair.node: replacing existing signature
+Nested signatures and manifest verified. Outer app must be signed last. RELEASE BLOCKED; no enrollment performed.
+PASS: explicit independent worker Node, real IPC, no RUN_AS_NODE env, no private configuration discovery
+
+== Orca baseline changed checks (22 pass) ==
+$ node config/scripts/check-changed.mjs --base=baseline/installed-1.4.249 --maxWorkers=2
+check:changed: 32 changed file(s) since baseline/installed-1.4.249 (fff61ecbac); running 22 check(s).
+✓ typecheck (tsconfig.node, tsconfig.tc.web, tsconfig.tc.cli) (2.7s)
+✓ format (0.1s)
+✓ oxlint (0.2s)
+✓ daemon-blocking-call-ratchet (1.8s)
+✓ direct-link-open-ratchet (0.8s)
+✓ changed-code quality (6.2s)
+✓ layout-writer-ratchets (4.5s)
+✓ flaky-test-pattern-ratchet (8.4s)
+✓ legacy-relay-fence-ratchet (3.4s)
+✓ max-lines-ratchet (1.5s)
+✓ memo-translate-subscription-ratchet (0.2s)
+✓ path-literal-ratchet (0.4s)
+✓ repo-host-read-ratchet (1.1s)
+✓ main-sync-spawn-ratchet (4.2s)
+✓ runtime-electron-ratchet (1.6s)
+✓ unproven-pty-retirement-ratchet (0.8s)
+✓ ts-nocheck-ratchet (1.4s)
+✓ worktree-id-composer-ratchet (0.8s)
+✓ test file runners (9.8s)
+✓ localization extraction (18.2s)
+✓ import boundaries (11.7s)
+✓ unit tests (51.7s)
+✓ 22 check(s) passed in 52.2s.
+
+Initial checks caught lint/import issues; fixed without gate exceptions. Host pnpm wrapper added unrelated lock entries; reverted tool-generated lock drift and used exact pnpm 12.14.0 JS entry. Final lockfile unchanged. Malformed ancillary warning is the deliberate negative FD test.

@@ -6,6 +6,7 @@ import re
 import sqlite3
 import uuid
 from secure_store import Store, dumps, loads, private
+from task_records import TaskRecords
 
 DEFAULTS = {'settings': {'accounts': {'enabled': True, 'environment': '', 'worktree': ''},
              'downloads': {'enabled': True, 'environment': '', 'sshHost': '', 'sshUser': '', 'sshPort': 22},
@@ -61,10 +62,12 @@ class ConfigStore(Store):
             CREATE TABLE leases(task TEXT PRIMARY KEY, target TEXT);
             INSERT INTO meta VALUES('migration','pending');
             COMMIT;''')
+        self.tasks = TaskRecords(self, initialize)
 
     def status(self):
         return {'state': 'ready' if self.meta('migration') == 'complete' else 'migration-pending',
                 'store_id': self.meta('store_id'), 'epoch': self.meta('epoch'),
+                'task_inventory': self.tasks.inventory(),
                 'target_leases': [{'task_id': task, 'target': loads(target)} for task, target in self.db.execute('SELECT task,target FROM leases')]}
 
     def read(self, name):
@@ -114,8 +117,8 @@ class ConfigStore(Store):
         if name == 'settings':
             old = loads(current['raw_json']).get('downloads', {})
             new = value.get('downloads', {})
-            if any(old.get(k) != new.get(k) for k in TARGET) and self.db.execute('SELECT 1 FROM leases LIMIT 1').fetchone():
-                raise ValueError('Download target lease active; cleanup required')
+            if any(old.get(k) != new.get(k) for k in TARGET):
+                self.tasks.require_quiescent()
         revision = int(current['revision']) + 1
         body = dumps(value)
         self.db.execute('UPDATE documents SET revision=?,body=? WHERE name=? AND revision=?',
@@ -140,6 +143,7 @@ class ConfigStore(Store):
         return {'preview_id': preview, 'hashes': hashes, 'documents': report}
 
     def import_preview(self, r):
+        self.tasks.require_quiescent()
         if self.meta('migration') == 'complete':
             raise ValueError('Already migrated; use versioned patch or restore')
         row = self.db.execute('SELECT raw,hashes FROM previews WHERE id=?', (r['preview_id'],)).fetchone()
@@ -183,8 +187,7 @@ class ConfigStore(Store):
         name = r['backup_id']
         if not re.fullmatch(r'backup-[a-f0-9]{32}\.sqlite', name):
             raise ValueError('Invalid backup identifier')
-        if self.db.execute('SELECT 1 FROM leases LIMIT 1').fetchone():
-            raise ValueError('Active target leases')
+        self.tasks.require_quiescent()
         private(self.root / name)
         source = sqlite3.connect('file:' + str(self.root / name) + '?mode=ro', uri=True)
         try:
@@ -212,6 +215,11 @@ class ConfigStore(Store):
             if r['op'] == 'backup':
                 return self.backup()
             def mutate():
+                if r['op'] in ('import', 'restore') and ('epoch' in r or 'store_id' in r):
+                    if r.get('epoch') != self.meta('epoch') or r.get('store_id') != self.meta('store_id'):
+                        raise ValueError('Configuration epoch changed')
+                if r['op'].startswith('task-'):
+                    return self.tasks.mutate(r)
                 if r['op'] == 'patch':
                     return self.patch(r)
                 if r['op'] == 'patch-many':
@@ -232,6 +240,8 @@ class ConfigStore(Store):
                     self.db.execute('INSERT INTO leases VALUES(?,?)', (r['task_id'], dumps(target)))
                     return {'task_id': r['task_id'], 'target': target}
                 if r['op'] == 'lease-release':
+                    if self.db.execute('SELECT 1 FROM host_tasks WHERE id=?', (r['task_id'],)).fetchone():
+                        raise ValueError('Host task ownership required')
                     self.db.execute('DELETE FROM leases WHERE task=?', (r['task_id'],))
                     return {'released': r['task_id']}
                 raise ValueError('Unknown operation')

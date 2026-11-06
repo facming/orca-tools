@@ -305,3 +305,6 @@ GITHUB_SHA 推断源码 HEAD。后续 fork 打包应明确设置 ORCA_BUILD_COMM
 
 PR #14/#15 仍是分层评审，不合并、不 ready、不修改上游。下一阶段先实现封印实例与
 Host-owned invocation context，再完成 runtime 分离及签名包验证，最后才启用路由。
+
+
+阶段 7B-8 增量：[Host configuration / task ownership 实施与边界](toolkit-host-7b8.md)。RELEASE BLOCKED 继续保留。

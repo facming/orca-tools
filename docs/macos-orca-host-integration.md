@@ -139,3 +139,6 @@ patch。恢复不能覆盖活动下载 target leases，服务会拒绝；本地�
 没有运行生产 LaunchDaemon 安装、sudo 跨 UID harness、真实迁移、生产 VPS 或原生 Windows。
 既有安全测试全部保留；本轮没有重跑未修改的 Docker SSH 角色部署验收。
 发布仍受 PR #14 的其余人工验收边界约束，不能据此解除 RELEASE BLOCKED。
+
+
+阶段 7B-8 增量：[Host configuration / task ownership 实施与边界](toolkit-host-7b8.md)。RELEASE BLOCKED 继续保留。

@@ -31,7 +31,7 @@ def main():
     proc=None
     try:
         code=root/'code';code.mkdir(mode=0o755)
-        for name in ('secure_store.py','config_store.py','ipc.py','service.py','peer_identity.c','bridge.c'):
+        for name in ('secure_store.py','config_store.py','task_records.py','ipc.py','service.py','peer_identity.c','bridge.c'):
             shutil.copyfile(repo/'plugins/toolkit/config-service'/name,code/name)
         state=root/'state';state.mkdir(mode=0o700);os.chown(state,svc.pw_uid,svc.pw_gid)
         run=root/'run';run.mkdir(mode=0o755);os.chown(run,svc.pw_uid,svc.pw_gid)

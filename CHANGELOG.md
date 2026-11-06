@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-06 — Host configuration / task ownership 7B-8 (RELEASE BLOCKED)
+
+- Add main-owned task handles, serialized lifecycle requests and durable isolated-service task records with owner/epoch/revision checks and target leases.
+- Connect the existing download engine through private lifecycle injection; preserve leases on pause, unknown results and unverified cleanup. Production Controller/download UI migration remains pending.
+- Enable maintenance actions only when Host inventory allows them; add field-level settings editing, bound migration/restore confirmation and stable mutation retries.
+- Sign nested Toolkit binaries before manifest generation; protect them from outer re-signing and verify the final seal. Formal signing/enrollment remains disabled.
+- Keep synthetic UI/identity, temporary signing and unperformed production acceptance separate. See [implementation and remaining risks](docs/toolkit-host-7b8.md).
+
+
 ## 2026-11-06 — 阶段 7B-7（RELEASE BLOCKED）
 
 - 修复 macOS 完整设置快照含未知字段时保存失败；只 patch 已知字段，保留未知嵌套数据和精确数字。

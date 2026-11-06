@@ -30,27 +30,23 @@ test('async clients keep per-instance and per-namespace snapshots, preserving ex
  const raw=backend.request({op:'read',namespace:'settings'}).raw_json;
  assert.ok(raw.includes('9007199254740993123456789'));assert.equal(JSON.parse(raw).gpu.enabled,false);assert.equal(JSON.parse(raw).accounts.enabled,false);
 });
-test('maintenance UI previews exact bytes, confirms a snapshot, displays backup/restore and reuses request IDs',async t=>{
+test('maintenance UI gates capabilities, preserves unknown fields and retries the same mutation',async t=>{
  const backend=fixture.install(t),elements=new Map();
- const element=id=>{if(!elements.has(id))elements.set(id,{disabled:false,checked:false,files:[],value:'',textContent:''});return elements.get(id);};
+ const element=id=>{if(!elements.has(id))elements.set(id,{disabled:false,checked:false,files:[],value:'',textContent:'',append(){}});return elements.get(id);};
  const source=fs.readFileSync(path.join(__dirname,'configuration-panel.html'),'utf8').match(/<script nonce="__TOKEN__">([\s\S]*?)<\/script>/)[1];
- const requests=[];let reloaded=0,fail=false;
+ const requests=[];let fail=false;
  const command=createCommands(backend);
- // This fixture is already migrated; preview remains available for inspection.
- const window={dispatchEvent:()=>{reloaded++;},confirm:()=>true,orcaToolkitConfiguration:{call:async request=>{requests.push(request);if(fail)throw Error('service offline');return command(request);}}};
- vm.runInNewContext(source,{document:{getElementById:element},window,crypto,Event:class{},Uint8Array,btoa:s=>Buffer.from(s,'binary').toString('base64'),fetch:async(url,options)=>{
-  assert.equal(url,'/api/configuration');assert.equal(options.headers['X-Toolkit-Token'],'__TOKEN__');const request=JSON.parse(options.body);requests.push(request);
-  try{if(fail)throw Error('service offline');const result=await command(request);return {ok:true,json:async()=>result};}catch(e){return {ok:false,json:async()=>({error:e.message})};}
- }});
- await element('config-preview').onclick();assert.match(element('config-result').textContent,/Select both/);assert.equal(requests.length,0);
+ const window={dispatchEvent(){},orcaToolkitConfiguration:{call:async request=>{requests.push(request);if(fail)throw Error('service offline');const result=await command(request);return request.operation==='status'?{...result,maintenance:{targetChange:true,confirm:false,restore:true,reason:''}}:result;}}};
+ await vm.runInNewContext(source,{document:{getElementById:element,createElement:()=>({append(){}})},window,crypto,Event:class{},Uint8Array,btoa:s=>Buffer.from(s,'binary').toString('base64')});
+ await element('config-preview').onclick();assert.match(element('config-result').textContent,/Select both/);
  const bytes=Buffer.from('{"future":9007199254740993123456789}');element('config-settings-file').files=[{size:bytes.length,arrayBuffer:async()=>Uint8Array.from(bytes).buffer}];element('config-preferences-defaults').checked=true;
- await element('config-preview').onclick();assert.equal(element('config-confirm').disabled,false);assert.equal(requests.at(-1).sources.settings,bytes.toString('base64'));
- await element('config-confirm').onclick();assert.match(element('config-result').textContent,/Already migrated/);assert.equal(requests.at(-1).operation,'confirm');
- await element('config-backup').onclick();assert.match(element('config-backup-id').value,/^backup-/);
- await element('config-restore').onclick();assert.match(element('config-result').textContent,/"state": "ready"/);assert.equal(reloaded,1);
- const restore=requests.at(-1);await element('config-retry').onclick();assert.deepEqual(requests.at(-1),restore);
- fail=true;await element('config-status').onclick();assert.match(element('config-result').textContent,/offline/);
- window.toolkitConfiguration.setState({configService:'host-required'});assert.equal(element('config-preview').disabled,true);assert.equal(element('config-status').disabled,false);
+ await element('config-preview').onclick();assert.equal(element('config-confirm').disabled,true);assert.equal(requests.at(-1).sources.settings,bytes.toString('base64'));
+ element('setting-gpu-enabled').checked=false;await element('config-save').onclick();
+ const patch=requests.find(r=>r.operation==='patch');assert.deepEqual(JSON.parse(JSON.stringify(patch.patch)),[{op:'set',path:['gpu','enabled'],value:false}]);
+ await element('config-backup').onclick();assert.match(element('config-backup-id').value,/^backup-/);assert.equal(element('config-retry').disabled,true);
+ fail=true;await element('config-restore').onclick();const restore=requests.at(-1);assert.match(element('config-result').textContent,/offline/);
+ fail=false;await element('config-retry').onclick();assert.equal(requests.filter(r=>r.operation==='restore').at(-1).request_id,restore.request_id);assert.match(element('config-result').textContent,/"state": "ready"/);
+ window.toolkitConfiguration.setState({configService:'host-required'});assert.equal(element('config-preview').disabled,true);assert.equal(element('config-restore').disabled,true);
 });
 test('Host method is versioned and response errors cannot masquerade as successful reads',async()=>{
  const client=createHostClient({host:{has:m=>m===METHOD,call:async()=>({ok:true})}});await assert.rejects(client.read('settings'),/Invalid trusted/);
