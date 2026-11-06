@@ -14,10 +14,10 @@ const {chromium}=createRequire(path.join(orca,'package.json'))('playwright');
   window.orcaToolkitTools={call:async()=>({accounts:[],requiresRefresh:true})};
   window.orcaToolkitDownloads={call:async input=>{
    window.fixture.calls.push(input);if(window.fixture.offline)throw Error('Host disconnected');
-   if(input.operation==='list')return {jobs:[job],enabled:true,recovery:[],defaultFolder:'/tmp/downloads',remoteLocation:{source:'',directory:''}};
+   if(input.operation==='list'&&window.fixture.failNextList){window.fixture.failNextList=false;throw Error('Synthetic task refresh timeout');}if(input.operation==='list')return {jobs:[job],enabled:true,recovery:[],defaultFolder:'/tmp/downloads',remoteLocation:{source:'',directory:''}};
    if(input.operation==='pause-all')job.status='paused';
    if(input.operation==='action'){if(input.action==='pause')job.status='paused';if(input.action==='resume')job.status='downloading';if(input.action==='cancel')job.status='cancelled';if(input.action==='cleanup')job.cleanupWarning=null;}
-   if(input.operation==='create'){window.fixture.creates.push(input.requestId);if(localStorage.getItem('drop-create'))throw Error('Synthetic lost create acknowledgement');return {job};}
+   if(input.operation==='create'){window.fixture.creates.push(input.requestId);if(window.fixture.failRefreshAfterCreate){window.fixture.failRefreshAfterCreate=false;window.fixture.failNextList=true;}if(localStorage.getItem('drop-create'))throw Error('Synthetic lost create acknowledgement');return {job};}
    return {};
   }};
  });
@@ -37,6 +37,11 @@ const {chromium}=createRequire(path.join(orca,'package.json'))('playwright');
  await page.locator('#host-download-source').fill('/project/fixture.bin');await page.locator('#host-download-create').click();await page.waitForFunction(()=>!document.getElementById('host-download-create').disabled);
  await page.locator('#host-download-create').click();await page.waitForFunction(()=>window.fixture.creates.length===2);
  const ids=await page.evaluate(()=>window.fixture.creates);assert.notEqual(ids[0],ids[1]);
+ await page.evaluate(()=>{window.fixture.failRefreshAfterCreate=true;});
+ await page.locator('#host-download-create').click();await page.waitForFunction(()=>!document.getElementById('host-download-create').disabled);
+ const refreshUnknown=await page.evaluate(()=>window.fixture.creates.at(-1));
+ await page.locator('#host-download-create').click();await page.waitForFunction(()=>!document.getElementById('host-download-create').disabled);
+ assert.equal(await page.evaluate(()=>window.fixture.creates.at(-1)),refreshUnknown);
  await page.evaluate(()=>localStorage.setItem('drop-create','yes'));
  await page.locator('#host-download-create').click();await page.waitForFunction(()=>!document.getElementById('host-download-create').disabled);
  const unknown=await page.evaluate(()=>window.fixture.creates.at(-1));

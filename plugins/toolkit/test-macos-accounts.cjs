@@ -147,7 +147,7 @@ test('macOS Accounts page runs refresh, masking, usage, disable/enable, switch a
 
 require('./fixtures/config-service.cjs').hooks(test);
 
-test('switch confirmation rejects a changed remote runtime and refreshes selected usage',async t=>{
+test('switch confirmation rejects a changed remote runtime',async t=>{
  const f=fixture();t.after(()=>f.close());
  let selected=false;
  const accounts=new Accounts(f.runtime,{createClient:()=>({isRemote:true,async call(method,params){
