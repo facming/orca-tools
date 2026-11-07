@@ -37,7 +37,11 @@ socket_parent=Path(policy['socket']).parent;socket_parent.mkdir(mode=0o755,exist
 config=Path('/etc/orca-download-policy.json')
 with config.open('x') as out:json.dump(policy,out)
 config.chmod(0o644)
-subprocess.run([str(python),'-I',str(dest/'service.py'),'--policy',str(config),'--initialize'],user=account.pw_uid,group=account.pw_gid,extra_groups=[],check=True)
+initialized=subprocess.run([str(python),'-I',str(dest/'service.py'),'--policy',str(config),'--initialize'],user=account.pw_uid,group=account.pw_gid,extra_groups=[],check=True,capture_output=True,text=True)
+key,epoch=initialized.stdout.rsplit('authority_epoch=',1)
+trust=Path('/etc/orca-download-trust.json')
+with trust.open('x') as out:json.dump({'receiptKey':key.strip()+'\n','authority_epoch':epoch.strip(),**{k:policy[k] for k in ('server_id','endpoint_id','account_id','signing_key_id')}},out)
+trust.chmod(0o644)
 unit=Path('/etc/systemd/system/orca-download-authority.service')
 with unit.open('x') as out:
     out.write('[Unit]\nDescription=Orca download authorization v3\nBefore=orca-download-sshd.service\n\n[Service]\nType=simple\nUser='+a.authority_user+'\nUMask=0077\nExecStart='+str(python)+' -I /opt/orca-download/service.py --policy '+str(config)+'\nRuntimeDirectory=orca-download\nRuntimeDirectoryMode=0755\nRestart=on-failure\nKillMode=control-group\nNoNewPrivileges=true\nProtectSystem=strict\nReadWritePaths='+str(state)+' '+str(socket_parent)+'\n\n[Install]\nWantedBy=multi-user.target\n')

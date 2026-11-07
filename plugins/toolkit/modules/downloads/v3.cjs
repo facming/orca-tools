@@ -20,8 +20,10 @@ function verify(envelope,trust,expected){
  return payload;
 }
 function trustFor(options){
- const file='/Library/Application Support/OrcaToolkitState/endpoints.json';
- for(let p=file;;p=path.dirname(p)){
+ const development=options.runtime?.development===true;
+ const file=development?options.runtime.endpointTrustFile:'/Library/Application Support/OrcaToolkitState/endpoints.json';
+ if(development){privatePath(path.dirname(file),true);privatePath(file);}
+ for(let p=file;!development;p=path.dirname(p)){
   const s=fs.lstatSync(p);if(s.isSymbolicLink()||s.uid!==0||(s.mode&0o022))throw new ToolkitError('Endpoint trust must be administrator-owned.');if(p==='/')break;
  }
  const value=JSON.parse(fs.readFileSync(file,'utf8'))[options.environment];
