@@ -1,0 +1,61 @@
+7B-18 | 2026-11-07 Asia/Shanghai | existing Mac + vps01 + System Default
+
+REAL ENVIRONMENT
+- Actual hidden Electron development Host, production download engine, existing
+  Orca RPC/SSH connection, actual VPS authority/loopback reader. No mock bytes.
+- 1 GiB random file: 1,073,741,824 bytes.
+  Source SHA-256: a1f98496d56d2c0c481ffc6a9ff59c50f8fa20500449b3aed3c41436cd72166b
+  Task: 2b136d6a74204cfe8efc1f1033f7fd0d; eight parallel reader connections.
+- Pause saved 100,663,296 bytes; Resume reused verified ranges.
+- SIGTERM only the owned development tunnel: automatic tunnel reconstruction and
+  automatic range retries recovered without clicking Resume.
+- Stop development entry while downloading: saved paused state and 167,772,160
+  durable bytes; supervisor exited in about one second. Further rebuild/restarts
+  recovered 301,989,888 and 532,676,608 durable bytes. No lost task or overwritten
+  destination. Restart deliberately stays paused until Resume.
+- Interrupted only an authorization CLI child owned by this Electron process.
+  Stable signed registration/request ID retried automatically. Final 1 GiB run
+  recorded retry count increase 40 -> 41 and entered downloading without Resume.
+- Actual TimeoutError under VPS authority contention was found and separated from
+  permission rejection. Whole-file hashing for every range was removed: initial
+  full digest + per-read block verification, bounded process-local cache.
+- Existing account refresh returned one account, active system-default, with
+  session/weekly usage. No account selection/login/credential edits were made.
+- Duplicate launch: reports already running; no second Host or borrowed tunnel.
+- Existing download authority only was updated. Default sshd, firewall, installed
+  Orca application and other Claude processes were not changed. Download export
+  quota increased from 256 MiB to 2 GiB on the existing service.
+
+AUTOMATED CHECKS (not replacements for the VPS run)
+- Download Node suites: 37 passed, 1 skipped (38 total; platform-specific case).
+- Authority Python: 6 passed, including cross-block bytes and changed staging
+  content with restored mtime rejection after cache warmup.
+- Host lifecycle/reconciliation: 9 passed; real SQLite and signatures with injected
+  endpoint/range responses.
+- Hidden Electron 1000x900: PASS. Actual window/preload/Host; dialog, account and
+  range responses synthetic. Initial ad-hoc build omitted the required external
+  process-host module and failed its editor fixture; correct harness build passed.
+- Staged Downloads UI: PASS (synthetic backend, actual DOM/render).
+- Local 1 GiB large test: PASS (synthetic network bytes, real disk/hash/restart).
+- History: 1,003 records (3 x 64 MiB + 1,000 small files), ready 106 ms,
+  list max 5 ms, peak RSS 76 MiB, close 1 ms; graceful and SIGKILL rehash passed.
+- Source/credential scan: PASS. Python compilation: PASS.
+- Orca initial full changed gate: unit tests/typechecks passed; six missing-brace
+  lint findings corrected before final gate. Final gate result below.
+
+FINAL REAL RESULT | 2026-11-07 09:27 Asia/Shanghai
+- 1 GiB COMPLETE, verified=true. Independent macOS shasum matches the full
+  source digest above exactly. Additional 8 MiB task also completed and verified.
+- Final stable samples: approximately 4-5 MiB/s. Final resumed phase started at
+  532,676,608 bytes; 177 seconds later 939,524,096 bytes were present (about
+  2.19 MiB/s inclusive of authorization retry, connection waits and lost ranges).
+  Total retries 51 include deliberate interruption and pre-fix contention; this
+  is not a claim of a clean uninterrupted benchmark.
+- Both new task receipts: signed REVOKED + DRAINED, persisted and verified.
+- Independent VPS read-only SQLite check: both tasks REVOKED, zero read leases.
+- Both local task key directories absent; partial files absent; completed files
+  retained. Host task states complete/released and target leases checked locally.
+- Development screenshot and detailed five-second samples remain in the private
+  development state directory, not in git (contain local filesystem paths).
+- Final Orca gate command: pnpm check:changed
+  --base=baseline/installed-1.4.249 --maxWorkers=2. Outcome reported in Draft PR.

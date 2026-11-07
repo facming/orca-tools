@@ -42,6 +42,7 @@ class Authority(Store):
     def __init__(self, root, policy, initialize=False):
         super().__init__(root, initialize)
         self.policy = policy
+        self.verified_blocks = {}
         if initialize:
             self.db.executescript('''BEGIN IMMEDIATE;
             CREATE TABLE tasks(id TEXT PRIMARY KEY, owner INTEGER, public TEXT UNIQUE, fingerprint TEXT UNIQUE,
@@ -237,6 +238,39 @@ class Authority(Store):
                 return self.envelope(result['receipt_payload'])
             return result
 
+    def verified_range(self, task, fd, info, offset, length):
+        block_size = 1024 * 1024
+        fingerprint = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        cached = self.verified_blocks.get(task['id'])
+        if cached is None or cached[0] != fingerprint:
+            digest, blocks = hashlib.sha256(), []
+            while True:
+                block = os.read(fd, block_size)
+                if not block:
+                    break
+                digest.update(block)
+                blocks.append(hashlib.sha256(block).digest())
+            if info.st_size != task['size'] or digest.hexdigest() != task['digest']:
+                raise ValueError('Staging object changed')
+            if len(self.verified_blocks) >= 8:
+                del self.verified_blocks[next(iter(self.verified_blocks))]
+            self.verified_blocks[task['id']] = (fingerprint, blocks)
+        else:
+            blocks = cached[1]
+        data = bytearray()
+        for index in range(offset // block_size, (offset + length - 1) // block_size + 1):
+            position = index * block_size
+            block = os.pread(fd, min(block_size, task['size'] - position), position)
+            if hashlib.sha256(block).digest() != blocks[index]:
+                raise ValueError('Staging object changed')
+            data.extend(block[max(0, offset - position):min(len(block), offset + length - position)])
+        after = os.fstat(fd)
+        if fingerprint != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise ValueError('Staging object changed')
+        if len(data) != length:
+            raise ValueError('Short staging read')
+        return bytes(data)
+
     def stream_read(self, actor, r, incoming, outgoing, peer_pid=None):
         if actor != self.policy['reader_uid']:
             raise PermissionError('Unauthorized reader peer')
@@ -253,17 +287,7 @@ class Authority(Store):
                 info = os.fstat(fd)
                 if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o400:
                     raise PermissionError('Staging object unsafe')
-                h = hashlib.sha256()
-                while True:
-                    block = os.read(fd, 1024*1024)
-                    if not block:
-                        break
-                    h.update(block)
-                if h.hexdigest() != task['digest']:
-                    raise ValueError('Staging object changed')
-                data = os.pread(fd, length, offset)
-                if len(data) != length:
-                    raise ValueError('Short staging read')
+                data = self.verified_range(task, fd, info, offset, length)
             finally:
                 os.close(fd)
             identity = self.process_identity(peer_pid)

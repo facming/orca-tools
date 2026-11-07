@@ -35,17 +35,42 @@ class V3Transport extends SshTransport{
  constructor(options){super(options);this.endpointOptions=options;this.trust=null;}
  ensureReady(){if(!this.trust){try{this.trust=trustFor(this.endpointOptions);}catch(e){throw e instanceof ToolkitError?e:new ToolkitError('Download authorization endpoint is not installed. Ask the administrator to configure v3 trust.');}}}
  bindings(job){return {protocol:3,server_id:this.trust.server_id,endpoint_id:this.trust.endpoint_id,account_id:this.trust.account_id,authority_epoch:this.trust.authority_epoch,task_id:job.id,task_public_key_sha256:job.publicKeyHash,signing_key_id:this.trust.signing_key_id};}
- async manage(request){
-  const payload=Buffer.from(canonical(request)).toString('base64');
-  // Fixed installed management client; no uploaded Python or shell program.
-  const command='/opt/orca-download/manage '+payload;let handle;
-  try{const r=await this.orca(['terminal','create','--worktree',this.trust.worktree,'--title','Download authorization v3','--command',command]);handle=r.terminal?.handle;if(!handle)throw Error();
-   for(let n=0;n<60;n++){await this.wait(500);const r=await this.orca(['terminal','read','--terminal',handle,'--limit','30']);const line=r.terminal?.tail?.find(x=>x.startsWith('ORCA_DOWNLOAD_V3='));if(line){if(line.length>65536)throw Error();return JSON.parse(line.slice('ORCA_DOWNLOAD_V3='.length));}}
-   throw Error();
-  }catch{throw new ToolkitError('Download authorization unavailable; task key retained.');}
-  finally{if(handle)await this.orca(['terminal','close','--terminal',handle]).catch(()=>{});}
+ async manage(request,{signal,onRetry=()=>{}}={}){
+  const command='/opt/orca-download/manage '+Buffer.from(canonical(request)).toString('base64');
+  for(let attempt=0;attempt<4;attempt++){
+   signal?.throwIfAborted();let handle;
+   try{
+    const r=await this.orca(['terminal','create','--worktree',this.trust.worktree,'--title','Download authorization v3','--command',command],signal);
+    handle=r.terminal?.handle;if(!handle)throw new ToolkitError('Orca did not create the authorization terminal.');
+    for(let n=0;n<120;n++){
+     await this.waitFor(500,signal);
+     const r=await this.orca(['terminal','read','--terminal',handle,'--limit','30'],signal);
+     const line=r.terminal?.tail?.find(x=>x.startsWith('ORCA_DOWNLOAD_V3='));
+     if(line){if(line.length>65536)throw new ToolkitError('Invalid authorization response.');try{return JSON.parse(line.slice('ORCA_DOWNLOAD_V3='.length));}catch{throw new ToolkitError('Invalid authorization response.');}}
+     const output=(r.terminal?.tail||[]).join('\n');
+     if(/TimeoutError:|ConnectionRefusedError:|ConnectionResetError:|BrokenPipeError:|Storage result unknown/.test(output))throw Object.assign(new ToolkitError('Remote authorization service temporarily unavailable.'),{retryable:true});
+     if(/PermissionError:|ValueError:/.test(output))throw new ToolkitError('Remote authorization rejected. Check the source path and download service policy.');
+    }
+    throw Object.assign(new ToolkitError('Authorization response timed out.'),{retryable:true});
+   }catch(error){
+    if(signal?.aborted)throw error;
+    if(!error.retryable)throw error;
+    if(attempt===3)throw new ToolkitError('Remote authorization is still unavailable after 4 attempts. Restore the Orca connection, then Resume; the task and key are retained.');
+    onRetry(attempt+1,1000*2**attempt);
+   }finally{
+    if(handle)await this.orca(['terminal','close','--terminal',handle],AbortSignal.timeout(3000)).catch(()=>{});
+   }
+   await this.waitFor(1000*2**attempt,signal);
+  }
  }
- async prepare(job){
+ async waitFor(ms,signal){
+  signal?.throwIfAborted();
+  if(!signal)return this.wait(ms);
+  let abort;
+  try{await Promise.race([this.wait(ms),new Promise((_,reject)=>{abort=()=>reject(new ToolkitError('Paused'));signal.addEventListener('abort',abort,{once:true});})]);}
+  finally{signal.removeEventListener('abort',abort);}
+ }
+ async prepare(job,options){
   if(job.protocol!==3)throw new ToolkitError('Legacy task: manual cleanup required.');
   this.ensureReady();
   job.authorizationState='preparing';this.persist(job);
@@ -62,7 +87,7 @@ class V3Transport extends SshTransport{
   this.persist(job);
   const result=await new Promise((resolve,reject)=>{const child=this.spawn(this.runtime.keygen,['-Y','sign','-f',key,'-n','orca-download-registration-v3'],{env:this.runtime.childEnv,stdio:['pipe','pipe','pipe']});const chunks=[];const timer=setTimeout(()=>child.kill(),15000);child.stdout.on('data',b=>chunks.push(b));child.stderr.resume();child.on('error',reject);child.on('close',code=>{clearTimeout(timer);code===0?resolve({stdout:Buffer.concat(chunks)}):reject(new ToolkitError('Task signing failed.'));});child.stdin.end(canonical(request));});
   request.proof=Buffer.from(result.stdout).toString('base64');
-  const meta=verify(await this.manage(request),this.trust,{...this.bindings(job),action:'register',state:'ACTIVE',request_id:job.registrationId});
+  const meta=verify(await this.manage(request,options),this.trust,{...this.bindings(job),action:'register',state:'ACTIVE',request_id:job.registrationId});
   if(!/^[a-f0-9]{32}$/.test(meta.auth_generation)||!Number.isSafeInteger(meta.size)||meta.size<0||!/^[a-f0-9]{64}$/.test(meta.sha256))throw new ToolkitError('Invalid registration metadata.');
   job.authGeneration=meta.auth_generation;job.authorizationState='active';this.persist(job);
   const known=path.join(dir,'known_hosts'),pin=job.id+' '+this.trust.hostKey+'\n';

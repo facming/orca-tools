@@ -82,6 +82,25 @@ class AuthorityTests(unittest.TestCase):
         self.assertEqual(result['state'],'REVOKING');self.assertNotIn('signature',result)
         with self.assertRaises(PermissionError):
             self.store.stream_read(self.policy['reader_uid'],{'task_id':task['id'],'generation':task['generation'],'offset':0,'length':4},io.BytesIO(),io.BytesIO())
+    def test_cached_ranges_reject_changed_staging_even_with_restored_mtime(self):
+        self.source.write_bytes(b'A' * (1024 * 1024) + b'B' * (1024 * 1024))
+        r = self.registration(); self.store.handle(self.owner, r)
+        task = self.store.task(r['task_id'])
+        request = {'task_id': task['id'], 'generation': task['generation'], 'offset': 1024 * 1024 - 2, 'length': 4}
+        output = io.BytesIO()
+        with self.assertRaises(ValueError):
+            self.store.stream_read(self.policy['reader_uid'], request, io.BytesIO(), output)
+        output.seek(0); self.assertTrue(receive(output)['ok']); self.assertEqual(output.read(), b'AABB')
+        staged = self.state / 'staging' / task['source']; before = staged.stat()
+        staged.chmod(0o600)
+        with staged.open('r+b') as f:
+            f.seek(1024 * 1024); f.write(b'C')
+        staged.chmod(0o400); os.utime(staged, ns=(before.st_atime_ns, before.st_mtime_ns))
+        output = io.BytesIO()
+        with self.assertRaisesRegex(ValueError, 'Staging object changed'):
+            self.store.stream_read(self.policy['reader_uid'], request, io.BytesIO(), output)
+        self.assertEqual(output.getvalue(), b'')
+
     def test_source_symlink_hardlink_escape_and_disk_failure(self):
         for mode in ('symlink','hardlink','outside'):
             r=self.registration();link=self.root/('link-'+mode)

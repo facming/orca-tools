@@ -122,3 +122,30 @@ test('remote revocation followed by local key deletion failure retries verified 
  mock.mock.restore();f.tr.manage=async()=>{throw Error('network must not be used');};
  await f.tr.cleanup(f.job);assert.equal(f.job.authorizationState,'revoked');assert.equal(fs.existsSync(f.key),false);
 });
+test('authorization retries lost replies with the identical registration and stops on denial',async()=>{
+ const tr=Object.assign(Object.create(V3Transport.prototype),{trust:{worktree:'path:/project'},wait:async()=>{}});
+ const commands=[];let disconnected=true;
+ tr.orca=async args=>{
+  if(args[1]==='create'){commands.push(args.at(-1));return {terminal:{handle:'transfer'}};}
+  if(args[1]==='read'&&disconnected){disconnected=false;throw Object.assign(Error('connection lost'),{retryable:true});}
+  if(args[1]==='read')return {terminal:{tail:['ORCA_DOWNLOAD_V3={"payload":"receipt","signature":"signed"}']}};
+  return {};
+ };
+ assert.deepEqual(await tr.manage({op:'register',request_id:'same-request'}),{payload:'receipt',signature:'signed'});
+ assert.equal(new Set(commands).size,1);
+ tr.orca=async args=>args[1]==='create'?{terminal:{handle:'denied'}}:args[1]==='read'?{terminal:{tail:['PermissionError: rejected']}}:{};
+ await assert.rejects(tr.manage({op:'register'}),/authorization rejected/);
+ const controller=new AbortController();controller.abort();
+ await assert.rejects(tr.manage({op:'register'},{signal:controller.signal}),/abort/i);
+});
+
+test('remote authorization timeout traceback retries instead of becoming a permanent denial',async()=>{
+ const tr=Object.assign(Object.create(V3Transport.prototype),{trust:{worktree:'path:/project'},wait:async()=>{}});
+ let timeout=true;
+ tr.orca=async args=>{
+  if(args[1]==='create')return {terminal:{handle:'auth'}};
+  if(args[1]==='read'){const tail=timeout?['Traceback (most recent call last):','TimeoutError: timed out']:['ORCA_DOWNLOAD_V3={"payload":"receipt","signature":"signed"}'];timeout=false;return {terminal:{tail}};}
+  return {};
+ };
+ assert.deepEqual(await tr.manage({op:'register',request_id:'same-request'}),{payload:'receipt',signature:'signed'});
+});

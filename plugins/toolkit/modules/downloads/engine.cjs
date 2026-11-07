@@ -68,6 +68,7 @@ class DownloadManager {
         if(job.status==='complete'&&job.cleanupWarning)this.options.onConnection?.('error');
         if (job.error) job.error = 'Previous download failed. Check the destination and remote connection before retrying.';
         if (!['complete','cancelled'].includes(job.status)) job.status = 'paused';
+        job.retry=null;
         job.verified=false;job.verificationState=job.status==='complete'?'pending':null;
         this.jobs.set(job.id, job);
       } catch {if(this.privateFiles)throw new ToolkitError('Saved download state is invalid or unsafe. Inspect it before continuing.');}
@@ -140,11 +141,13 @@ class DownloadManager {
       const live = this.live.get(job.id), done = new Set(job.done);
       let bytes = [...done].reduce((n,i) => n + Math.min(job.chunk, job.size - i * job.chunk), 0);
       if (live) bytes += [...live.ranges.values()].reduce((a,b) => a+b, 0);
-      const speed = live ? Math.max(0, (bytes-live.initialBytes) / Math.max(1,(Date.now()-live.start)/1000)) : 0;
+      const now=Date.now();
+      if(live){live.samples=live.samples.filter(sample=>now-sample.time<5000);}
+      const speed=live&&job.status==='downloading'?live.samples.reduce((sum,sample)=>sum+sample.bytes,0)/Math.max(1,Math.min(5,(now-live.start)/1000)):0;
       return {id:job.id, source:job.source, name:job.name, destination:job.destination, status:job.status,
         size:job.size || 0, bytes, speed, percent:job.status==='complete'?100:job.size?Math.min(100,bytes/job.size*100):0,
         concurrency:job.concurrency, connections:live?.ranges.size||0, retries:job.retries||0,
-        error:job.error||null, verified:job.verified===true&&job.verificationState==='verified', verificationState:job.verificationState||null, cleanupWarning:job.cleanupWarning||null,authorizationState:job.authorizationState||null,recoveryError:job.recoveryError||null};
+        retry:live?.retrying?.size?{phase:'transfer',attempt:Math.max(...[...live.retrying.values()].map(r=>r.attempt)),nextRetryAt:Math.min(...[...live.retrying.values()].map(r=>r.at))}:job.retry||null, etaSeconds:speed>0?Math.ceil(Math.max(0,job.size-bytes)/speed):null, error:job.error||null, verified:job.verified===true&&job.verificationState==='verified', verificationState:job.verificationState||null, cleanupWarning:job.cleanupWarning||null,authorizationState:job.authorizationState||null,recoveryError:job.recoveryError||null};
     });
   }
   async create({source, folder, concurrency=12, requestId}) {
@@ -188,21 +191,22 @@ class DownloadManager {
     if (this.runs.has(job.id)) throw new ToolkitError('This download is already running');
     const controller=new AbortController();
     const promise=(async()=>{await this.options.hostTasks?.transition(job.id,'running');if(controller.signal.aborted)throw new ToolkitError('Paused');await this.run(job,controller.signal);})().catch(async error=>{
-      job.status=controller.signal.aborted?'paused':'error';if(!controller.signal.aborted)this.options.onConnection?.('error');job.error=controller.signal.aborted?null:publicMessage(localError(error), 'Download failed. Check file permissions and the remote connection.');this.save(job);
+      job.retry=null;job.status=controller.signal.aborted?'paused':'error';if(!controller.signal.aborted)this.options.onConnection?.('error');job.error=controller.signal.aborted?null:publicMessage(localError(error), 'Download failed. Check file permissions and the remote connection.');this.save(job);
       await this.options.hostTasks?.transition(job.id,job.status).catch(()=>{});
     }).finally(()=>{this.live.delete(job.id);this.runs.delete(job.id);});
     this.runs.set(job.id,{controller,promise});
   }
   async run(job,signal) {
-    job.error=null;
+    job.error=null;job.retry=null;job.status='preparing';
+    const preparation={signal,onRetry:(attempt,ms)=>{job.retries++;job.retry={phase:'authorization',attempt,nextRetryAt:Date.now()+ms};this.save(job);}};
     if(this.options.hostTasks&&job.sha256){
-      const meta=await this.transport.prepare(job);
+      const meta=await this.transport.prepare(job,preparation);
       if(meta.size!==job.size||meta.sha256!==job.sha256)throw new ToolkitError('Saved metadata differs from signed registration. Retain files and clear access before restarting.');
       job.verified=false;
     }
     if (!job.sha256) {
       job.status='preparing';job.cleanupWarning='Transfer access cleanup pending; use Clear access.';this.save(job);
-      const meta=await this.transport.prepare(job);
+      const meta=await this.transport.prepare(job,preparation);
       let handle;
       try{handle=fs.openSync(job.partial,'wx',0o600);}catch(error){
         if(error.code!=='EEXIST'||!this.privateFiles||job.done.length)throw error;
@@ -231,7 +235,8 @@ class DownloadManager {
     for(const index of done){if(!job.chunkHashes[index])continue;const data=Buffer.alloc(Math.min(job.chunk,job.size-index*job.chunk));fs.readSync(fd,data,0,data.length,index*job.chunk);if(crypto.createHash('sha256').update(data).digest('hex')!==job.chunkHashes[index]){done.delete(index);delete job.chunkHashes[index];}}
     job.done=[...done];
     if(fs.fstatSync(fd).size!==job.size)throw new ToolkitError('Partial file size changed. Create a new download.');
-    const live={ranges:new Map(),start:Date.now(),initialBytes:[...done].reduce((n,i)=>n+Math.min(job.chunk,job.size-i*job.chunk),0)};
+    job.retry=null;
+    const live={samples:[],retrying:new Map(),ranges:new Map(),start:Date.now(),initialBytes:[...done].reduce((n,i)=>n+Math.min(job.chunk,job.size-i*job.chunk),0)};
     this.live.set(job.id,live);job.status='downloading';job.error=null;this.save(job);
     const queue=Array.from({length:Math.ceil(job.size/job.chunk)},(_,i)=>i).filter(i=>!done.has(i));let cursor=0,failed=false;
     const worker=async()=>{
@@ -239,13 +244,13 @@ class DownloadManager {
         for(let attempt=0;attempt<6&&!signal.aborted;attempt++){
           try{
             await this.slots.run(signal,async()=>{
-              live.ranges.set(index,0);let received=0;const digest=crypto.createHash('sha256');
+              live.retrying.delete(index);live.ranges.set(index,0);let received=0;const digest=crypto.createHash('sha256');
               try{await this.transport.read(job,offset,length,signal,(data,position)=>{
                 if(position!==received||position+data.length>length)throw new ToolkitError('Invalid byte range');
-                let written=0;while(written<data.length){const count=fs.writeSync(fd,data,written,data.length-written,offset+position+written);if(!count)throw new ToolkitError('Unable to write download range.');written+=count;}digest.update(data);received+=data.length;live.ranges.set(index,received);
+                let written=0;while(written<data.length){const count=fs.writeSync(fd,data,written,data.length-written,offset+position+written);if(!count)throw new ToolkitError('Unable to write download range.');written+=count;}digest.update(data);received+=data.length;const now=Date.now(),sample=live.samples.at(-1);if(sample&&now-sample.time<250)sample.bytes+=data.length;else live.samples.push({time:now,bytes:data.length});live.samples=live.samples.filter(s=>now-s.time<5000);live.ranges.set(index,received);
               });if(received!==length)throw new ToolkitError('Incomplete byte range');job.chunkHashes[index]=digest.digest('hex');}finally{live.ranges.delete(index);}
             });success=true;break;
-          }catch(error){lastError=error;if(signal.aborted)break;if(['ENOSPC','EACCES','EPERM','EROFS'].includes(error.code)){failed=true;throw localError(error);}job.retries++;this.save(job);
+          }catch(error){lastError=error;if(signal.aborted)break;if(error.retryable===false||attempt===5){failed=true;throw error;}if(['ENOSPC','EACCES','EPERM','EROFS'].includes(error.code)){failed=true;throw localError(error);}job.retries++;live.retrying.set(index,{attempt:attempt+1,at:Date.now()+Math.min(10000,1000*(attempt+1))});this.save(job);
             await new Promise(resolve=>{const timer=setTimeout(finish,Math.min(10000,1000*(attempt+1)));function finish(){clearTimeout(timer);signal.removeEventListener('abort',finish);resolve();}signal.addEventListener('abort',finish,{once:true});});
           }
         }
