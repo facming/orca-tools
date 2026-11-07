@@ -38,7 +38,7 @@ function usageDetails(result,id,verifiedActiveId,strictProvenance){
 function publicState(result,verifiedActiveId=null,strictProvenance=false){
  if(!result?.claude||!Array.isArray(result.claude.accounts))throw new ToolkitError('The remote account response is unavailable.');
  const active=result.claude.activeAccountId;
- const state= {activeAccountId:typeof active==='string'?active:null,accounts:result.claude.accounts.filter(a=>typeof a.id==='string').map(a=>({id:a.id,email:maskedEmail(a.email),current:a.id===active,needsSignIn:a.needsSignIn===true,...usageDetails(result,a.id,verifiedActiveId,strictProvenance)}))};
+ const state= {activeAccountId:typeof active==='string'?active:null,accounts:result.claude.accounts.filter(a=>typeof a.id==='string').map(a=>({id:a.id,email:maskedEmail(a.email),source:'managed',accountType:a.authMethod==='subscription-oauth'?'Claude subscription':'Managed account',current:a.id===active,needsSignIn:a.needsSignIn===true,...usageDetails(result,a.id,verifiedActiveId,strictProvenance)}))};
  const limits=result.rateLimits?.claude;
  if(result.claude.systemDefaultEmail||(active===null&&(limits?.status==='ok'||limits?.usageMetadata?.authProvenance==='system'))){
   const current=systemBinding(result);
@@ -63,6 +63,9 @@ class Accounts {
   }catch(error){this.clients.delete(settings.environment);throw error instanceof ToolkitError?error:remoteAccountError(error);}
  }
  async list(settings,refreshUsage=false,identity={}){
+  const state=await this.snapshot(settings,refreshUsage,identity);return {...state,runtimeId:identity.runtimeId,scope:'remote'};
+ }
+ async snapshot(settings,refreshUsage=false,identity={}){
   const first=await this.call(settings,'accounts.list',{refreshUsage},identity),id=first?.claude?.activeAccountId,candidate=first?.rateLimits?.claude;
   if(systemBinding(first)&&first.claude.accounts.length===0&&missingProvenance(candidate)&&candidate?.status==='ok'&&!candidate.error){
    const second=await this.call(settings,'accounts.list',{refreshUsage:false},identity);
@@ -86,8 +89,15 @@ class Accounts {
    if(account.needsSignIn)throw new ToolkitError('Sign in again on the remote host to use this account.');
    if(body.expectedActiveAccountId!==state.activeAccountId)throw new ToolkitError('The active account has changed. Refresh before switching.');
    if(account.current)return state;
-   await this.call(settings,'accounts.selectClaude',{accountId:account.id===SYSTEM_DEFAULT?null:account.id},identity);
-   const after=await this.list(settings,true,identity);
+   try{await this.call(settings,'accounts.selectClaude',{accountId:account.id===SYSTEM_DEFAULT?null:account.id},identity);}catch(error){
+    try{const observed=await this.list(settings,false,identity);if(observed.activeAccountId===account.id)await this.call(settings,'accounts.selectClaude',{accountId:state.activeAccountId===SYSTEM_DEFAULT?null:state.activeAccountId},identity);}catch{throw new ToolkitError('Switch could not be confirmed or restored. Refresh the runtime before starting a new session.');}
+    throw error;
+   }
+   let after;
+   try{after=await this.list(settings,true,identity);}catch{
+    try{await this.call(settings,'accounts.selectClaude',{accountId:state.activeAccountId===SYSTEM_DEFAULT?null:state.activeAccountId},identity);}catch{throw new ToolkitError('Switch verification failed; restoring the previous selection could not be confirmed. Refresh before starting a session.');}
+    throw new ToolkitError('Switch verification failed. The previous account selection was restored. Refresh to retry.');
+   }
    if(!await isCurrent())throw new ToolkitError('Remote connection changed. Refresh to check the selected account.');
    if(after.activeAccountId!==account.id)throw new ToolkitError('Switch not confirmed. Refresh to check the active account.');
    return after;

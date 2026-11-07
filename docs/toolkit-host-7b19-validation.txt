@@ -1,0 +1,37 @@
+7B-19 | 2026-11-07 Asia/Shanghai
+
+REAL VPS / CURRENT MAC
+- Existing paired connection; zero managed accounts at validation time.
+- System Default shown; Session 0%, Weekly 32% used. Weekly reset received.
+- VPS snapshot does not report System Default email or Session reset time.
+- Real accounts.hostSignInStart -> waiting -> cancel -> cancelled.
+- Same sequence through the actual hidden Electron Host, preload and Toolkit UI.
+- Account list still contains only the original System Default after cancellation.
+- No fake account, copied login, simulated credential or default CLI login used.
+- Render inspected at 1120x860, 760x860 and 480x860, without horizontal overflow.
+- New separate development entry loads the existing six download records:
+  five completed, one cancelled. No active download was interrupted.
+- Original development entry retained. Installed Orca and its credentials not replaced.
+- User is registering a second account through RustDesk; success, switching,
+  new-session identity and real managed disable/enable/delete remain pending.
+
+AUTOMATED EVIDENCE (SYNTHETIC WHERE NOTED)
+- Remote login adapter: 3 Vitest tests, including native clipboard handoff,
+  remote-only execution, lifecycle cancellation and redacted panel state.
+- Accounts / preferences / Host tools: 27 Node tests passed.
+- Download engine / macOS / V3: 37 passed, one platform-specific skip.
+- Staged download UI: passed; synthetic backend, actual rendered DOM. Covers
+  progress/speed/ETA, pause/resume/cancel, checksum state, cleanup retry and
+  interrupted create request recovery.
+- Source/credential scan: passed.
+- Orca pnpm check:changed --base=baseline/installed-1.4.249 --maxWorkers=2:
+  all 41 checks passed, including unit tests and typecheck. Final pre-push
+  recheck uses the same PR base after documentation staging.
+
+LIMITS
+- A successful browser authorization is required before claiming a second account.
+- Disable is the existing Toolkit selection preference, not a global VPS logout.
+- A disconnected runtime may prevent confirmed rollback; the UI reports this
+  explicitly and does not claim the old selection was restored.
+- Existing account-bound usage checks remain. Unattributable usage is Unknown.
+- No Windows UI, production install, new localhost RPC, main merge or upstream push.
