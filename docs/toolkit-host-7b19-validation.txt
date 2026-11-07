@@ -12,7 +12,7 @@ REAL VPS / CURRENT MAC
 - New separate development entry loads the existing six download records:
   five completed, one cancelled. No active download was interrupted.
 - Original development entry retained. Installed Orca and its credentials not replaced.
-- User is registering a second account through RustDesk; success, switching,
+- User has registered a second account; managed sign-in success, switching,
   new-session identity and real managed disable/enable/delete remain pending.
 
 AUTOMATED EVIDENCE (SYNTHETIC WHERE NOTED)
@@ -35,3 +35,11 @@ LIMITS
   explicitly and does not claim the old selection was restored.
 - Existing account-bound usage checks remain. Unattributable usage is Unknown.
 - No Windows UI, production install, new localhost RPC, main merge or upstream push.
+
+VPS-ONLY BROWSER CORRECTION
+- Removed the Mac browser button and accounts-login-open Host operation.
+- Provider links can only be copied to the clipboard for the VPS browser.
+- Account login code imports no browser opener; GPU manager behavior is unchanged.
+- Hidden Electron regression rejects the removed Host operation during sign-in
+  and verifies no browser invocation; login adapter tests and source scan rerun.
+- Development launcher targets the new build; no running user flow was restarted.
