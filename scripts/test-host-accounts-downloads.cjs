@@ -59,6 +59,8 @@ finally:s.close()`;
  const page=await electron.firstWindow();page.setDefaultTimeout(20000);await page.setViewportSize({width:1000,height:900});page.on('pageerror',error=>console.error(error));
  await page.waitForFunction(()=>document.getElementById('config-capabilities').textContent.includes('Preview both'));
  assert.equal(await electron.evaluate(()=>global.fixture.panel.isVisible()),false);
+ await page.getByRole('link',{name:'Settings',exact:true}).click();
+ await page.evaluate(()=>{window.confirm=()=>true;});
  await page.locator('#config-settings-defaults').check();await page.locator('#config-preferences-defaults').check();
  await page.locator('#config-preview').click();await page.waitForFunction(()=>!document.getElementById('config-confirm').disabled);
  await electron.evaluate(()=>{global.fixture.allow=false;});await page.locator('#config-confirm').click();
