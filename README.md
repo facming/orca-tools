@@ -6,17 +6,17 @@
 
 ## macOS 移植计划
 
-当前仓库的本机执行端以 Windows 为主；macOS 适配尚处于规划与兼容性侦察阶段，并不代表已经可以安装使用。技术方案、分阶段验收和 Codex 协作方式见 [macOS 移植方案](docs/macos-port-plan.md)。
+2026-11-07：**7B-18 账户和下载核心功能已通过真实 Mac、现有 Claude 账户及 VPS 验收**。当前交付为独立开发版，固定构建 SHA-256、启动/关闭及常见故障处理见 [日常使用说明](docs/toolkit-host-7b18-daily-use.md)，完整阶段边界见 [状态总览](docs/toolkit-status.md)。保留两个 Draft PR，不覆盖现有 Orca、不修改生产配置；其他引擎冻结保留，后续仅按日常使用反馈修复。历史方案见 [macOS 移植方案](docs/macos-port-plan.md)。
 
 ## 一个插件，三个业务模块
 
 在 Orca 中只需安装 [Orca Toolkit](plugins/toolkit/)，用 **Ctrl+Alt+T** 打开统一管理页 `http://127.0.0.1:18774/`。
 
-| 模块 | 职责 | 管理方式 | 部署说明 |
-| --- | --- | --- | --- |
-| Accounts | 切换远程 Claude 账号、查看用量与重置时间 | Toolkit 本机账号页，通过已有远程连接切换 | [账号部署](docs/account-switcher.md) |
-| Downloads | 并行下载、暂停续传、重试、SHA-256 校验 | Toolkit 内的下载页面；Ctrl+Alt+D | [下载模块](docs/parallel-download.md) |
-| GPU | ComfyUI、Godot、Blender、VRoid、Tripo Studio、Git 渲染副本 | Toolkit 查看在线状态并打开本机 GPU 管理页；Ctrl+Alt+G | [GPU 部署](docs/gpu-bridge.md) |
+| 模块      | 职责                                                       | 管理方式                                              | 部署说明                              |
+| --------- | ---------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------- |
+| Accounts  | 切换远程 Claude 账号、查看用量与重置时间                   | Toolkit 本机账号页，通过已有远程连接切换              | [账号部署](docs/account-switcher.md)  |
+| Downloads | 并行下载、暂停续传、重试、SHA-256 校验                     | Toolkit 内的下载页面；Ctrl+Alt+D                      | [下载模块](docs/parallel-download.md) |
+| GPU       | ComfyUI、Godot、Blender、VRoid、Tripo Studio、Git 渲染副本 | Toolkit 查看在线状态并打开本机 GPU 管理页；Ctrl+Alt+G | [GPU 部署](docs/gpu-bridge.md)        |
 
 Toolkit 统一管理模块入口、连接配置、启用状态与启动。账号凭据留在 VPS，GPU 服务留在 Windows，Claude MCP 插件留在 VPS；它们不是额外需要安装的 Orca UI 插件。模块各自执行任务，单个模块未配置不影响其余模块。
 

@@ -1,5 +1,7 @@
 # 阶段 7B-18：现有 Mac / Claude / VPS 日常使用
 
+**2026-11-07 收尾：账户和下载核心功能真实环境验收通过。** 固定开发构建、SHA-256、启动/关闭与排错说明见 [日常使用交付](toolkit-host-7b18-daily-use.md)。保留两个 Draft PR；其他引擎继续冻结，后续只按用户日常使用反馈修复。
+
 继续 Toolkit Draft PR #15（base `feature/macos-security-finalization`）及 Orca Draft PR #1（base `baseline/installed-1.4.249`）。起点分别为 `21e05f824b1135b674264e3ca929f6fcb2b67a62`、`8acd6e719fe4ae50583536e0d768b44052de7565`。未改 main、未合并、未推送官方上游、未覆盖 `/Applications/Orca.app`。
 
 ## 修复

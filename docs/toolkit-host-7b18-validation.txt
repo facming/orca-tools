@@ -59,3 +59,42 @@ FINAL REAL RESULT | 2026-11-07 09:27 Asia/Shanghai
   development state directory, not in git (contain local filesystem paths).
 - Final Orca gate command: pnpm check:changed
   --base=baseline/installed-1.4.249 --maxWorkers=2. Outcome reported in Draft PR.
+
+
+7B-18 FREEZE / DAILY-USE HANDOFF | 2026-11-07 Asia/Shanghai
+- Status: real-environment account and download core acceptance PASSED.
+  Scope: existing System Default account refresh/usage and actual VPS transfers;
+  no claim of a second-account switch or every historical acceptance matrix item.
+- Frozen code: Orca 9cf8fc8158398aeb863e0f642d91b41629d06e5e;
+  Toolkit 4df60d2cd711d2ccc5fadeb3589747a13b5651d5. Later handoff commits
+  change documentation only. Original local pnpm-lock.yaml change preserved.
+- Exact existing development files archived, not rebuilt. 34 payload files;
+  all 25 sealed Host manifest entries match. External runtime dependencies
+  documented separately; this is a local snapshot, not a portable installer.
+- Archive: orca-toolkit-dev-7B-18-20261107-arm64.tar.gz, 39,649,399 bytes.
+  SHA-256: 4e58af6e2b62b078daa7a0ff677ad77c40ea09e3bdb8b0569495740884a576c0
+- launch.command and stop.command: shell syntax PASS; executed via env -i
+  with HOME/USER/LOGNAME and system-only PATH, from /private/tmp and /.
+  No background flag, CDP, fixture server or manual tunnel was required.
+- Actual visible Development window loaded; existing System Default account,
+  usage and download history visible. Live Toolkit ready logged; no traceback
+  or uncaught exception. Duplicate launch refused a second instance.
+- stop.command: normal exit 0; control.sock removed; owned port 22468 released.
+  Stop before startup and repeated stop after shutdown both returned not running.
+  Installed Orca PID remained alive. No active transfer was started in this
+  closeout; downloading-stop durability evidence remains the original run above.
+- Before/after read-only comparison: 8,038 installed Orca regular files equal;
+  selected existing profile domains including settings/sshTargets equal;
+  29 remote files equal (including one Claude credential file and five Claude
+  JSON files in total); 27 running VPS services retained state, PID and start time.
+  No production config changes, remote writes, service restarts or account edits.
+- Prior final Orca gate confirmed from saved log: all 41 checks passed in 72.9 s.
+  Closeout does not rerun or expand the test framework; changes are documentation.
+- Both PRs remain Open/Draft, original bases preserved, auto-merge disabled.
+  No merge/main change/upstream push. Other engines and prior evidence preserved.
+- Follow-up policy: fix concrete daily-use feedback only; no proactive feature,
+  architecture or test-framework expansion. See toolkit-host-7b18-daily-use.md.
+- Closeout checks: archive SHA256SUMS passed; all 34 archived payload entries
+  re-read from tar and verified against their recorded size/SHA-256. Independent
+  1 GiB destination SHA-256 still matches the original real VPS digest above.
+  Updated documentation local links, whitespace and source/credential scan passed.
