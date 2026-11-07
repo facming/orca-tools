@@ -1,0 +1,99 @@
+7B-13 evidence — 2026-11-06 Asia/Shanghai — Draft / RELEASE BLOCKED
+Starting Orca 873616d11faa9a7f075f1855dcb7895253ad8239
+Starting Toolkit f248c808c13a1c47d4e557b73a760e41240d04d2
+
+REAL LOCAL API COMPILATION
+python3 scripts/test-unity-compile.py
+PASS: OrcaUnityBridge.cs compiled with the installed Unity 6000.5.4f1 Roslyn compiler,
+Unity engine/editor assemblies and Unity .NET reference assemblies. No API stubs.
+EntityId conversion/lookup and all existing finite Editor operations compile.
+An initial compiler harness referenced both monolithic and modular UnityEditor
+assemblies; removed the duplicate monolithic reference and compilation passed.
+Final Built-in-only pipeline branch also recompiled successfully.
+
+REAL BLENDER 5.2.3 LTS INTEGRATION — PASS
+Final read-only scan found /Applications/Blender.app (not installed by this task).
+Fixed stable official "LTS" suffix rejection; alpha/beta versions stay rejected.
+python3 scripts/test-macos-blender-live.py
+python3 scripts/test-macos-blender-live.py --cpu
+Both PASS: real scene_info, create_primitive, set_transform, OBJ export/import,
+blend save/open, 64x64 Cycles render and integrity-checked PNG retrieval.
+Metal: backend METAL, metal_devices=1, cpu_fallback=false, hardware_render=true.
+CPU: backend CPU, hardware_render=false. Separate new projects/private settings.
+Harness adds --background; service handles the same spool synchronously in that
+mode, with no app activation, installation or real project/config changes.
+Metal first kernel preparation took around two minutes and completed successfully.
+Temporary logs: /tmp/orca-7b13-blender-live.txt and
+/tmp/orca-7b13-blender-cpu-live.txt. Both owned processes shut down.
+39 Blender-related automated tests PASS after the LTS/background changes.
+
+REAL EDITOR START ATTEMPT — BLOCKED, NOT A PASS
+python3 scripts/test-macos-unity-live.py
+Real installed 6000.5.4f1, NEW disposable project, reviewed extension, private
+Bridge/session storage, real subprocess. Adds -batchmode and fixture log output
+to production launch arguments; no visible activation or user project changes.
+Editor exited 198. License service: no matching entitlements, missing
+com.unity.editor.headless. Extension heartbeat was never reached.
+Runtime scene/object/Play/screenshot/import steps therefore NOT RUN.
+Script preserves the disposable fixture and prints its evidence location.
+No license activation/login, installation, real config migration or upgrade attempted.
+Local diagnostic log: /tmp/orca-unity-7b13-live.txt (temporary, not a release artifact).
+
+REAL MACOS HOST / FILESYSTEM / TEXTEDIT, SYNTHETIC ENGINES
+ORCA_BACKGROUND_LAUNCH=1 node scripts/test-host-electron.cjs ../orca \
+ /tmp/orca-7b13-verified/toolkit-host /tmp/orca-7b13-window.cjs \
+ /tmp/orca-7b13-authority.cjs
+Production hidden Electron window/main/preload/staged panel, 1000x900, temporary
+SQLite/settings and real authenticated loopback Bridge. Real Unicode/space paths.
+Actual /usr/bin/open -g -b com.apple.TextEdit via fixed process adapter; launch
+exit status checked. Engine execution, Comfy inference, accounts, service identity,
+native picker/confirmation answers remain synthetic. TextEdit save is not automated.
+Covers project browse/read/edit, same-ID native lost-ack retry (one task), logs,
+cancel, workflow import/update/CAS/delete/restore/run/inspect, actual PNG decode in
+renderer, artifact export, downloaded-resource copy, application picker routing,
+unknown action/path and second-WebContents rejection. Existing accounts, settings,
+download target lease restrictions and remote browsing regression retained.
+Temporary screenshots: /tmp/toolkit-workbench-7b13.png and
+/tmp/toolkit-host-electron-7b13.png; inspected for clipping and usable controls.
+Local electron skill is unavailable; repository Playwright/CDP harness used.
+
+AUTOMATED REGRESSION — SYNTHETIC ENGINE / BACKEND EXECUTION
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+310 total: 307 PASS / 3 existing platform skips / 0 failures.
+New cases: text masquerading/link/hardlink rejection; installation validation and
+session-only selection/failed probe; workflow revision conflict/delete/restore;
+Comfy unknown submission reinspection (one backend submit); resource-copy
+no-overwrite/path denial; real PNG bytes; exact 6000.5.4f1/string uint64 bounds and
+heartbeat protocol. Existing 6000.0 protocol cases retained.
+After final C# pipeline guard: test_macos_unity.py, 35/35 PASS and real compile PASS.
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+108 total: 107 PASS / 1 existing platform skip / 0 failures.
+ORCA_BACKGROUND_LAUNCH=1 pnpm test src/main/toolkit --maxWorkers=2
+12/12 PASS, 4 files.
+ORCA_BACKGROUND_LAUNCH=1 pnpm tc:node — PASS.
+Full Orca main electron-vite build — PASS, existing dynamic-import warnings only.
+python3 scripts/check.py; node --check plugins/toolkit/host-workbench-ui.js;
+git diff --check — PASS.
+
+PACKAGING / UI REPRODUCTION
+From Orca: bundle native/toolkit-host/authority-test-entry.mjs and
+src/main/toolkit/toolkit-window.ts with esbuild --platform=node --format=cjs;
+window bundle uses --external:electron --external:@orca/process-host.
+Stage with pinned Node 24.22.1 and its headers into a NEW output directory;
+seal.mjs OUTPUT/toolkit-host - --test-only; smoke-worker.mjs OUTPUT.
+PASS staging, nested ad-hoc seal, independent-worker smoke and headless download UI regression.
+These are disposable ad-hoc signing tests; no production enrollment or install.
+The final changed gate runs after the final commit immediately before push:
+ORCA_BACKGROUND_LAUNCH=1 pnpm check:changed \
+ --base=baseline/installed-1.4.249 --maxWorkers=2
+Initial gate found two new curly-brace lint errors; both were corrected.
+Its final result and exact paired heads are recorded on both Draft PRs.
+
+BOUNDARIES
+Read-only probe-macos-engines.py: Blender 5.2.3 LTS found in standard roots and
+subsequently tested as above; no qualified Godot found. Unity metadata accepted only for reviewed 6000.0 or exact 6000.5.4f1, with
+runtime checks still mandatory. No managed Comfy inference environment supplied.
+No Windows feature/parity work. No main change, merge, upstream push, production
+application/service installation, real-config migration or production VPS access.
+RELEASE BLOCKED: actual Unity runtime/GPU, Godot, broader Blender workloads, Comfy inference, packaged
+Host admission and local enrollment still require their respective acceptance.

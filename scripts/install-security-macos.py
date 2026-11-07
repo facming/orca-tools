@@ -43,7 +43,7 @@ for file in (python,*python.parents):
     if st.st_uid!=0 or st.st_mode & 0o022:raise SystemExit('Python runtime must be root-owned and protected: '+str(file))
 source=Path(a.bundle).resolve(strict=True)
 manifest=json.loads((source/'manifest.json').read_text())
-expected={'service.py','config_store.py','secure_store.py','ipc.py','recover.py','config-bridge','peer_identity.dylib','requirement.txt'}
+expected={'service.py','config_store.py','task_records.py','secure_store.py','ipc.py','recover.py','config-bridge','peer_identity.dylib','requirement.txt'}
 if set(manifest)!=expected:raise SystemExit('Unexpected bundle manifest')
 for name,sha in manifest.items():
     f=source/name

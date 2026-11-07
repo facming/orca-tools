@@ -200,6 +200,7 @@ class Bridge:
         return values + self.library.workflows()
     def catalog(self):
         return [{**{k: w.get(k, {}) for k in ('id', 'name', 'description', 'parameters')},
+                 'revision':hashlib.sha256(json.dumps(w, sort_keys=True).encode()).hexdigest(),
                  'source':w.get('source','imported'),'available':w.get('available',True),
                  'required_parameters':w.get('required_parameters',[]),
                  **({'unavailable_reason':w['unavailable_reason']} if 'unavailable_reason' in w else {})} for w in self.workflows()]
@@ -207,7 +208,7 @@ class Bridge:
         result = {k: job[k] for k in ('id', 'workflow_id', 'kind', 'status', 'created_at', 'updated_at')}
         for key in ('error', 'message'):
             if key in job: result[key] = job[key]
-        for key in ('attempt','retry_of'):
+        for key in ('attempt','retry_of','workflow_revision','progress'):
             if key in job: result[key] = job[key]
         result['artifacts'] = [{'index': i, 'filename': item['filename']} for i, item in enumerate(job.get('artifacts', []))]
         return result
@@ -236,7 +237,7 @@ class Bridge:
                 if old['status'] in ('submitting', 'queued', 'running', 'unknown'): active += 1
             if active >= self.config.get('max_active_jobs', 8): raise ValueError('Bridge job limit reached. Check existing jobs before submitting more.')
             job = {'id': uuid.uuid4().hex, 'request_id': request_id, 'fingerprint': fingerprint,
-                   'workflow_id': workflow['id'], 'kind': 'comfyui.workflow', 'status': 'submitting',
+                   'workflow_id': workflow['id'], 'workflow_revision': hashlib.sha256(json.dumps(workflow, sort_keys=True).encode()).hexdigest(), 'kind': 'comfyui.workflow', 'status': 'submitting',
                    'created_at': time.time(), 'updated_at': time.time(), 'artifacts': []}
             job.update(attempt_fields(existing))
             self.jobs[job['id']] = job; self.save(job)

@@ -185,6 +185,25 @@ for(const action of ['start','stop'])document.getElementById(action).onclick=()=
             try:
                 if not local and not hmac.compare_digest(self.headers.get('Authorization', '').encode(), ('Bearer ' + read_token(bridge.platform.root)).encode()):
                     return self.reply(403, {'error': 'Access denied.'})
+                if self.command == 'POST' and self.path == '/api/workbench':
+                    if self.headers.get('Origin') != 'http://' + expected or self.headers.get('Transfer-Encoding'):
+                        return self.reply(403, {'error': 'Access denied.'})
+                    size = int(self.headers.get('Content-Length', '0'))
+                    if not 0 < size <= 1024 * 1024:
+                        return self.reply(400, {'error': 'Workbench request exceeds limit.'})
+                    command = json.loads(self.rfile.read(size))
+                    if security and not security.check():
+                        return self.reply(403, {'error': 'Access denied.'})
+                    if not local and not hmac.compare_digest(self.headers.get('Authorization', '').encode(), ('Bearer ' + read_token(bridge.platform.root)).encode()):
+                        return self.reply(403, {'error': 'Access denied.'})
+                    from bridge_platform.macos_workbench import dispatch
+                    try:
+                        result = dispatch(bridge, process, command)
+                    except ValueError as error:
+                        return self.reply(400, {'error': str(error)[:1000]})
+                    if security and security.revoked.is_set():
+                        return self.reply(403, {'error': 'Access denied.'})
+                    return self.reply(200, result)
                 if self.command == 'GET' and self.path == '/api/health':
                     return self.reply(200, health(bridge, process))
                 if self.command == 'GET' and self.path == '/api/workflows':

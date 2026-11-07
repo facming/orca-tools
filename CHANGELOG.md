@@ -1,4 +1,76 @@
+## 2026-11-06 — accounts and downloads first 7B-14 (RELEASE BLOCKED)
+
+- Focus macOS work on Claude accounts and remote downloads; freeze existing engine/workbench features and retain Windows code.
+- Restore Host account selection on open, refresh usage after switching, reject concurrent changes and changed runtime confirmations, and discard UI results invalidated by settings changes.
+- Persist unknown download request identities across window/app restarts, deduplicate unfinished transfers, rehash completed files on recovery, and retain cleanup debt until both authorization and local files are cleared.
+- Verify real hidden Electron/main/production preload, temporary authorities/signatures/files, 32 MiB integration and 1 GiB local transfer; distinguish synthetic accounts/network from real local evidence.
+- See [phase overview](docs/toolkit-status.md), [feature checklist and risks](docs/toolkit-host-7b14.md), and [test evidence](docs/toolkit-host-7b14-validation.txt).
+
+## 2026-11-06 — macOS workbench and Unity 6000.5 API adapter 7B-13 (RELEASE BLOCKED)
+
+- Align the validated TextEdit edit command across Host and Bridge; test actual background application launch.
+- Add conditional Unity 6000.5.4f1 EntityId/string protocol and real installed-API compilation; retain exact version and graphics checks. Full Editor integration is blocked by the local headless license, with a reproducible disposable-project runner.
+- Fix official Blender LTS version detection; verify real Blender 5.2.3 CPU/Metal rendering, scene operations and import/export in disposable projects.
+- Add Blender/Godot application selection and qualification, imported workflow revision/update/delete/restore, bounded PNG previews, artifact export and explicit downloaded-resource copies.
+- Extend hidden Host/real loopback regression and distinguish synthetic engines from actual macOS launch/compiler evidence. See [feature checklist and risks](docs/toolkit-host-7b13.md) and [test evidence](docs/toolkit-host-7b13-validation.txt).
+
+## 2026-11-06 — macOS project workbench 7B-12 (RELEASE BLOCKED)
+
+- Add Host project discovery/selection, real file browsing/preview and TextEdit entry, native task submit/query/cancel, results/logs and explicit execution consent.
+- Reuse Blender/Godot/Unity Bridge engines and ComfyUI workflow library; add ComfyUI lifecycle/import/typed parameters/execute/inspect and stable retry identities.
+- Connect approved project roots to downloads and verified resources back to the workbench; keep ordinary plugin authority unchanged.
+- Fix engine discovery interrupted by unrelated malformed application metadata. Add actual hidden Electron/loopback/filesystem validation; keep synthetic engines and unperformed hardware acceptance separate.
+- macOS is the target; Windows code remains, with no UI parity or hardware obligation. See [features, risks and deferred installation](docs/toolkit-host-7b12.md) and [test evidence](docs/toolkit-host-7b12-validation.txt).
+
+## 2026-11-06 — Toolkit product regression 7B-11 (RELEASE BLOCKED)
+
+- Add explicit Host menu routes for accounts, downloads, GPU/native status and settings; ordinary plugin commands cannot claim privileged work succeeded.
+- Reuse account UI and engine adapters in the sealed Host window; fix stale account actions and missing four-engine status. Preserve Windows manager and GPU startup.
+- Improve download progress/ETA, cancellation, pause-all, retry recovery, browser navigation and request identity after successful creation.
+- Record product regression, native GUI parity gaps and the deferred local signing/install acceptance plan. See [7B-11 checklist and risks](docs/toolkit-host-7b11.md).
+
+## 2026-11-06 — Toolkit Host 7B-10 (RELEASE BLOCKED)
+
+- Make released terminal cleanup retryable after restart and lost responses; preserve task intent after post-create disk failures and deduplicate concurrent requests.
+- Revalidate signed metadata on resume, reject forged completion/receipts, and retain maintenance barriers while local keys remain.
+- Reuse remote browsing and preferences in the Host window; add recovery retry, directory choice, progress and Finder reveal.
+- Deny legacy macOS plugin/localhost download mutations; retain Windows and GPU paths.
+- Document local-use-first acceptance, actual ad-hoc tests, installed-app read-only audit and remaining packaging/enrollment blockers. See [7B-10](docs/toolkit-host-7b10.md).
+
 # Changelog
+
+## 2026-11-06 — Host download integration 7B-9 (RELEASE BLOCKED)
+
+- Wire the production maintenance window to a sealed main-owned download engine, private lifecycle and guarded download controls; ordinary plugins receive no task ownership or lease-release capability.
+- Persist creation intent before Host tasks, deduplicate create retries, CAS-claim interrupted tasks, and adopt only existing verified-target legacy leases. Keep unknown/orphan inventory blocked.
+- Reuse registration/revocation identities and re-verify saved signed receipts before Host release and local key deletion.
+- Run the actual hidden Electron window/preload with synthetic identity/dialog responses; fix its first-load readiness race. Add a strict read-only formal package gate; no Developer ID positive acceptance is claimed.
+- See [implementation, evidence and remaining risks](docs/toolkit-host-7b9.md). Formal signing, complete legacy recovery and macOS cross-UID acceptance remain blocked.
+
+## 2026-11-06 — Host configuration / task ownership 7B-8 (RELEASE BLOCKED)
+
+- Add main-owned task handles, serialized lifecycle requests and durable isolated-service task records with owner/epoch/revision checks and target leases.
+- Connect the existing download engine through private lifecycle injection; preserve leases on pause, unknown results and unverified cleanup. Production Controller/download UI migration remains pending.
+- Enable maintenance actions only when Host inventory allows them; add field-level settings editing, bound migration/restore confirmation and stable mutation retries.
+- Sign nested Toolkit binaries before manifest generation; protect them from outer re-signing and verify the final seal. Formal signing/enrollment remains disabled.
+- Keep synthetic UI/identity, temporary signing and unperformed production acceptance separate. See [implementation and remaining risks](docs/toolkit-host-7b8.md).
+
+
+## 2026-11-06 — 阶段 7B-7（RELEASE BLOCKED）
+
+- 修复 macOS 完整设置快照含未知字段时保存失败；只 patch 已知字段，保留未知嵌套数据和精确数字。
+- Host handler 接入原生调用撤销与 28 秒超时；新增跨仓库 authority/FD 3/SCM_RIGHTS/双 Security.framework/SQLite、并发、异常退出和 FD 生命周期验证。
+- localhost 配置端点与公开配置命令拒绝访问；维护面板迁到 Host 自有 preload 合约。
+- 合成身份测试明确标注；正式签名包、跨 UID、完整 Host task/UI 迁移未完成，维持 RELEASE BLOCKED。见 [实施与验证记录](docs/toolkit-host-7b7.md)。
+
+
+## 2026-11-05 — macOS Orca 宿主集成阶段 7B-5（Draft / Host blocked）
+
+- Toolkit 新增版本化可信 Host client 和供封印主进程纳入的固定 Bridge handler；settings、下载偏好与 target lease 使用同一异步通道，SQLite/Bridge/原始调用者双重签名规则不变。
+- 结构化配置命令及 Mac 维护面板支持读取、字段修改、状态、迁移预览/确认、备份/恢复与结果；每窗口保留版本，冲突和旧 epoch 拒绝，未知结果重试保留 request_id。
+- 实查 Orca 1.4.249：RUN_AS_NODE worker 无独立签名身份，已有 host.call 但缺配置接口，缺签名 opt-in 且 fuses 不满足 enrollment。旧 Host 明确 host-required，不回退 JSON 或直接 Bridge。
+- 新增生产命令/Host handler/原生 Bridge/SQLite 合成宿主链测试及真实随包 worker 的隔离拒绝探针；Windows JSON、UI、GPU/MCP 回归保留。**真实获准 Orca 主进程成功调用仍待 Host 实现，不宣称生产集成完成。**
+- Host 修改范围、接口、命令参数和验证边界见 [宿主集成记录](docs/macos-orca-host-integration.md)。
 
 ## 2026-11-05 — macOS 安全存储与下载授权阶段 7B-3（Draft / 待审查）
 

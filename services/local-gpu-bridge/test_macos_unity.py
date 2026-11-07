@@ -115,6 +115,25 @@ class UnityTests(unittest.TestCase):
         with patch('bridge_platform.macos_unity.platform.mac_ver',return_value=('10.15','','')):
             self.assertEqual(self.control.status()['state'],'unsupported')
 
+    def test_6000_5_requires_exact_patch_string_ids_and_protocol(self):
+        self.plist.write_bytes(plistlib.dumps({**self.meta, 'CFBundleShortVersionString': '6000.5.4f1'}))
+        (self.project/'ProjectSettings/ProjectVersion.txt').write_text('m_EditorVersion: 6000.5.4f1\n')
+        body = dict(engine='unity', project_id='fixture', operation='gameobject.get', arguments={'id': '18446744073709551615'}, authorized=True)
+        self.assertEqual(self.control.validate(body), self.project)
+        for value in (1, 9007199254740993, '18446744073709551616', '-1', '01'):
+            with self.assertRaises(ValueError): self.control.validate({**body, 'arguments': {'id': value}})
+        child = Child(None)
+        folder = private_dir(self.root/'health')
+        self.control.session = dict(process=child, folder=folder, secret='x', project=self.project, version='6000.5.4f1')
+        health = dict(session='x', project=str(self.project), version='6000.5.4f1', pid=child.pid, timestamp=time.time())
+        (folder/'health.json').write_text(json.dumps(health))
+        self.assertIsNone(self.control.health())
+        (folder/'health.json').write_text(json.dumps({**health, 'protocol': 2, 'object_ids': 'uint64-string'}))
+        self.assertEqual(self.control.health()['object_ids'], 'uint64-string')
+        self.control.session = None
+        self.plist.write_bytes(plistlib.dumps({**self.meta, 'CFBundleShortVersionString': '6000.5.5f1'}))
+        with self.assertRaises(Unsupported): self.control.probe()
+
     def test_project_version_exact_no_upgrade(self):
         for text in ('','m_EditorVersion: 6000.0.59f1','m_EditorVersion: 6000.1.0f1'):
             (self.project/'ProjectSettings/ProjectVersion.txt').write_text(text)

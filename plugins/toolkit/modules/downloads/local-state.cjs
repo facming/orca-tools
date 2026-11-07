@@ -9,7 +9,7 @@ function privatePath(file,directory=false){
 function privateDirectory(dir){fs.mkdirSync(dir,{recursive:true,mode:0o700});privatePath(dir,true);}
 function writeJson(file,value){
  const temp=file+'.'+crypto.randomBytes(8).toString('hex')+'.tmp';let fd;
- try{fd=fs.openSync(temp,'wx',0o600);fs.writeFileSync(fd,JSON.stringify(value,null,2));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;fs.renameSync(temp,file);}
+ try{fd=fs.openSync(temp,'wx',0o600);fs.writeFileSync(fd,JSON.stringify(value,null,2));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;fs.renameSync(temp,file);if(process.platform!=='win32'){const parent=fs.openSync(path.dirname(file),'r');try{fs.fsyncSync(parent);}finally{fs.closeSync(parent);}}}
  finally{if(fd!==undefined)fs.closeSync(fd);fs.rmSync(temp,{force:true});}
 }
 function acquireLock(root){

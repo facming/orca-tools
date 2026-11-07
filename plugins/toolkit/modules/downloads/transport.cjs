@@ -43,13 +43,17 @@ class SshTransport {
     Object.assign(this,{execute,spawn,wait,onConnection});
     Object.assign(this, {dataDir, runtime, cli: runtime.cli, environment, sshHost, sshUser, sshPort});
   }
-  async orca(args) {
+  async orca(args, signal) {
     let stdout;
     try { ({stdout} = await this.execute(this.cli, [...args, '--environment', this.environment, '--json'],
-      {env:this.runtime.childEnv,windowsHide: true, timeout: 65000, maxBuffer: 2 * 1024 * 1024})); }
-    catch { this.onConnection('offline');throw new ToolkitError('Unable to reach Orca. Check that Orca and the remote connection are open.'); }
+      {signal,env:this.runtime.childEnv,windowsHide: true, timeout: 30000, maxBuffer: 2 * 1024 * 1024})); }
+    catch { this.onConnection('offline');throw Object.assign(new ToolkitError('Unable to reach Orca. Check that Orca and the remote connection are open.'),{retryable:true}); }
     let response;try{response=JSON.parse(stdout);}catch{throw new ToolkitError('Invalid Orca response.');}
-    if (!response.ok) throw new ToolkitError('Orca request failed.');
+    if (!response.ok) {
+      const code=String(response.error?.code||response.code||'').toLowerCase();
+      const retryable=['timeout','request_timeout','etimedout','disconnected','connection_closed','econnreset','econnrefused','enotfound','enetunreach'].includes(code);
+      throw Object.assign(new ToolkitError(retryable?'Orca connection interrupted. Reconnecting authorization.':'Orca request failed. Check the remote environment and permissions.'),{retryable});
+    }
     return response.result;
   }
   directory(job) { if(!/^[a-f0-9]{32}$/.test(job.id))throw new ToolkitError('Invalid transfer ID');return path.join(this.dataDir, 'keys', job.id); }
@@ -128,27 +132,30 @@ class SshTransport {
       if (signal.aborted) return reject(new ToolkitError('Paused'));
       const child = this.spawn(this.runtime.ssh, [...this.arguments(job), 'read', String(offset), String(length)],
         {env:this.runtime.childEnv,windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']});
-      let received = 0, settled = false;
+      let received = 0, settled = false, diagnostic='', idleTimer;
+      const watchProgress=()=>{clearTimeout(idleTimer);idleTimer=setTimeout(()=>{child.kill();finish(new ToolkitError('No download data received for 30 seconds. Reconnecting the SSH download channel.'));},30000);};
       const abort = () => child.kill();
       signal.addEventListener('abort', abort, {once: true});
       const finish = error => {
         if (settled) return;
         settled = true;
+        clearTimeout(idleTimer);
         signal.removeEventListener('abort', abort);
         if(!signal.aborted)this.onConnection(error?'offline':'ready');
         error ? reject(error) : resolve();
       };
+      watchProgress();
       child.stdout.on('data', data => {
         if(settled)return;
         try {
           if (received + data.length > length) throw new ToolkitError('Invalid range response');
-          onData(data, received); received += data.length;
+          onData(data, received); received += data.length;watchProgress();
         } catch (error) { child.kill(); finish(error); }
       });
-      child.stderr.resume();
+      child.stderr.on('data',data=>{if(diagnostic.length<8192)diagnostic+=data.toString().slice(0,8192-diagnostic.length);});
       child.on('error', finish);
       child.on('close', code => finish(code === 0 && received === length ? null :
-        new ToolkitError(signal.aborted ? 'Paused' : 'Transfer interrupted. Check the SSH connection.')));
+        signal.aborted?new ToolkitError('Paused'):/REMOTE HOST IDENTIFICATION HAS CHANGED|Host key verification failed/i.test(diagnostic)?Object.assign(new ToolkitError('SSH host identity changed. Verify the download endpoint before continuing.'),{retryable:false}):/Permission denied/i.test(diagnostic)?Object.assign(new ToolkitError('Download access was denied. Clear access and create a new task after checking the endpoint authorization.'),{retryable:false}):new ToolkitError('Transfer interrupted. Reconnecting the SSH download channel.')));
     });
   }
   async cleanup(job) {

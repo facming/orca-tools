@@ -64,7 +64,7 @@ def install(config, adapter, bridge_python=None):
         private_dir(directory)
     for name in FILES:
         write_private(adapter.root / 'app' / name, (SOURCE / name).read_bytes())
-    for name in ('__init__.py', 'base.py', 'macos.py', 'macos_godot.py', 'macos_godot_http.py', 'macos_blender.py', 'macos_unity.py', 'macos_native.py', 'windows.py'):
+    for name in ('__init__.py', 'base.py', 'macos.py', 'macos_godot.py', 'macos_godot_http.py', 'macos_blender.py', 'macos_unity.py', 'macos_native.py', 'macos_workbench.py', 'windows.py'):
         write_private(adapter.root / 'app/bridge_platform' / name, (SOURCE / 'bridge_platform' / name).read_bytes())
     token = secrets.token_hex(32)
     write_private(adapter.root / 'token', token.encode())

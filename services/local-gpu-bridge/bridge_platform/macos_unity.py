@@ -13,6 +13,7 @@ import subprocess
 import threading
 import time
 import uuid
+from xml.parsers.expat import ExpatError
 
 from .macos import private_dir, write_private
 from .macos_godot import (GodotControl, Unsupported, canonical, inside, open_inside,
@@ -20,7 +21,7 @@ from .macos_godot import (GodotControl, Unsupported, canonical, inside, open_ins
 from .macos_blender import filtered, publish
 
 EXTENSION = Path(__file__).resolve().parents[1] / 'OrcaUnityBridge.cs'
-VERSION = re.compile(r'6000\.0\.\d+f\d+')
+VERSION = re.compile(r'(?:6000\.0\.\d+f\d+|6000\.5\.4f1)')
 # Exact patch matching prevents an implicit project upgrade. Other series need review.
 FIELDS = {
     'editor.status': {}, 'scene.get': {}, 'hierarchy.get': {},
@@ -40,10 +41,10 @@ COMPONENTS = {'Camera': {'field of view': (1, 179), 'orthographic size': (.01, 1
               'BoxCollider': {'is trigger': (0, 1)}}
 
 
-def catalog():
+def catalog(version='6000.0'):
     return [{'name': n, 'description': 'Managed Unity Editor API: ' + n,
              'inputSchema': {'type': 'object', 'properties': {
-                 k: dict(type=t, **({'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3} if t == 'array' else {}))
+                 k: dict(type=('string' if k == 'id' and version == '6000.5.4f1' else t), **({'items': {'type': 'number'}, 'minItems': 3, 'maxItems': 3} if t == 'array' else {}))
                  for k, t in fields.items()}, 'required': REQUIRED[n], 'additionalProperties': False}}
             for n, fields in FIELDS.items()]
 
@@ -59,7 +60,7 @@ def editor(value):
         raise ValueError('Select a Unity Editor bundle.')
     versions = {v for v in (meta.get('CFBundleShortVersionString'), meta.get('CFBundleVersion')) if isinstance(v, str) and VERSION.fullmatch(v)}
     if len(versions) != 1:
-        raise Unsupported('unsupported: unambiguous stable Unity 6000.0 Editor metadata is required.')
+        raise Unsupported('unsupported: reviewed Unity 6000.0 or exact 6000.5.4f1 Editor metadata is required.')
     version = versions.pop()
     minimum = meta.get('LSMinimumSystemVersion', '11.0')
     if not re.fullmatch(r'\d+(?:\.\d+){0,2}', minimum):
@@ -78,7 +79,7 @@ def discover(search_dirs=None, selected=None):
             with open_inside(canonical(hub), 'Contents/Info.plist') as stream:
                 if 'unity' in plistlib.load(stream).get('CFBundleIdentifier', '').lower():
                     hubs.append(str(hub))
-        except (ValueError, OSError):
+        except (ValueError, OSError, ExpatError):
             pass
         candidates += list(root.glob('Unity/Hub/Editor/*/Unity.app')) + list(root.glob('Unity.app'))
     editors = []
@@ -88,7 +89,7 @@ def discover(search_dirs=None, selected=None):
             row = {'path': str(exe), 'version': version}
             if row not in editors:
                 editors.append(row)
-        except (ValueError, OSError):
+        except (ValueError, OSError, ExpatError):
             pass
     return {'hubs': hubs, 'editors': editors}
 
@@ -176,6 +177,10 @@ class UnityControl(GodotControl):
             raise ValueError('Unexpected or missing Unity arguments.')
         for key, value in args.items():
             kind = fields[key]
+            if key == 'id' and self.probe()[1] == '6000.5.4f1':
+                if not isinstance(value, str) or not re.fullmatch(r'[1-9][0-9]{0,19}', value) or int(value) > 2**64 - 1:
+                    raise ValueError('Unity 6000.5 object IDs must be decimal uint64 strings.')
+                continue
             valid = type(value) is int if kind == 'integer' else (type(value) in (float, int) and math.isfinite(value)) if kind == 'number' else isinstance(value, str) if kind == 'string' else isinstance(value, list) and len(value) == 3 and all(type(v) in (int, float) and math.isfinite(v) and abs(v) <= 100000 for v in value)
             if not valid:
                 raise ValueError('Invalid typed Unity argument.')
@@ -200,8 +205,8 @@ class UnityControl(GodotControl):
         if not isinstance(dependencies, dict):
             raise ValueError('Invalid package manifest.')
         for package in ('com.unity.render-pipelines.universal', 'com.unity.render-pipelines.high-definition'):
-            if package in dependencies and (not isinstance(dependencies[package], str) or not re.fullmatch(r'17\.0\.\d+', dependencies[package])):
-                raise Unsupported('unsupported: Unity 6000.0 requires reviewed URP/HDRP 17.0.x; packages are never changed.')
+            if package in dependencies and (self.probe()[1] == '6000.5.4f1' or not isinstance(dependencies[package], str) or not re.fullmatch(r'17\.0\.\d+', dependencies[package])):
+                raise Unsupported('unsupported: 6000.0 requires URP/HDRP 17.0.x; 6000.5.4f1 currently qualifies Built-in only; packages are never changed.')
         # Fixed extension must already have been installed locally by the user.
         with open_inside(root, 'Assets/Editor/OrcaUnityBridge.cs') as stream:
             if stream.read() != EXTENSION.read_bytes():
@@ -228,6 +233,7 @@ class UnityControl(GodotControl):
         try:
             if (health.get('session') != s['secret'] or health.get('pid') != s['process'].pid or
                     health.get('project') != str(s['project']) or health.get('version') != s['version'] or
+                    (s['version'] == '6000.5.4f1' and (health.get('protocol') != 2 or health.get('object_ids') != 'uint64-string')) or
                     not 0 <= time.time() - health.get('timestamp', 0) <= 5):
                 return None
             s['last_health'] = health
@@ -268,7 +274,7 @@ class UnityControl(GodotControl):
         self.authorize(project_id, authorized)
         with self.lock:
             self.require_session(project_id)
-            return {'tools': catalog()}
+            return {'tools': catalog(self.session['version'])}
 
     def call(self, project_id, name, arguments=None, authorized=None):
         return self.queue(dict(engine='unity', project_id=project_id, operation=name,

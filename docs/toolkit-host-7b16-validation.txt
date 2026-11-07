@@ -1,0 +1,109 @@
+7B-16 evidence — 2026-11-06/07 Asia/Shanghai — Draft / RELEASE BLOCKED
+Starting Orca c1e32d580f8fbe52e71d696a4bade30dca1a27fb
+Starting Toolkit d5e4b7e5259ea4d0babedfc97d276e7a423c48a8
+User explicitly confirmed no independent nonproduction accounts or VPS available.
+Only account/download P0; no production/runtime feature implementation changes.
+
+EVIDENCE CLASSES
+1 Real local: files, processes, SHA-256, SQLite, signatures, actual hidden Electron.
+2 Mock account RPC: list/select/usage/runtime identity/failures are injected.
+3 Mock remote browse: files.browseServerDir and repo listing are injected.
+4 Mock SSH bytes: range/manage transport replaced, no actual SSH connections.
+5 Real remote accounts: NOT RUN (A01-A09; no dedicated test identities/runtime).
+6 Real VPS downloads: NOT RUN (D01-D09, real H01-H04; no dedicated test VPS).
+Mixed tests contribute to 1-4, never promote to 5/6 or double-count totals.
+See toolkit-host-7b16-tests.md for exact script-to-class mapping.
+
+REAL LOCAL HISTORY / SYNTHETIC JOB METADATA
+node scripts/test-download-history.cjs --large
+PASS; exit 0. macOS 15.7.5 (24G624), arm64, MacBookPro18,2, 64 GiB RAM.
+Runner Node v20.20.2; this is not the shipping Electron/worker performance result.
+No other test/build suite was run concurrently with the measured interval.
+1,008 generated persisted records: 8 x 1 GiB + 1,000 x 1 KiB real, non-sparse files.
+8,590,958,592 logical bytes; ready 137 ms; total full SHA-256 352,911 ms.
+Logical average 23.22 MiB/s; CPU user+system 19,828 ms; sampled peak RSS 74 MiB.
+Event loop P99 25 ms / max 76 ms. 3,486 list samples / maximum list duration 13 ms.
+During active verification: manager.close 1 ms; normal child exit 4 ms, exit code 0.
+Separate real SIGKILL, stale-lock recovery, all 1,008 records pending/unverified
+at next ready, then all full hashes verified. Temporary workload removed.
+Source runner keeps the original 7B-15 workload as default; --large is opt-in.
+No real Host ownership/leases, no remote transfers, no full app UI timing.
+No physical per-process disk IO measured. Newly written data may be cached.
+A short iostat sample collected near/after the end is NOT used as benchmark IO:
+its first sample is cumulative and subsequent device totals include unrelated IO.
+Cold disk/external volume, real Host reconciliation, concurrent new-download IO,
+and actual app Quit timing remain manual H01-H04. No cold-cache claim or SLA.
+
+OFFLINE FIXTURE GENERATOR
+python3 scripts/prepare-7b16-fixtures.py --output <new temporary absolute path>
+PASS: 7 full independent /usr/bin/shasum -a 256 comparisons: empty, 16 B,
+32 MiB, 1 GiB, Unicode/space, hidden, readonly. Exact sizes matched manifest;
+205 pagination entries, outside-root symlink, existing output refused.
+Test directory removed in finally. Script itself never deletes or connects.
+First local dry run rejected macOS /var alias; corrected parent canonicalization
+(the canonical project path is emitted), then reran successfully.
+Generated manifest/data are local fixture evidence, NOT actual VPS acceptance.
+
+P0 AUTOMATED REGRESSION (CLASSES 1-4)
+node --test plugins/toolkit/test-macos-accounts.cjs plugins/toolkit/test-accounts.cjs \
+ plugins/toolkit/test-host-tools.cjs plugins/toolkit/test-remote-browser.cjs \
+ plugins/toolkit/modules/downloads/test*.cjs
+71 total: 70 PASS, 1 existing Windows-installation platform skip, 0 failures.
+Duration 19,123.8 ms. Covers provenance, stale/missing credentials, confirmed
+selection, disable/enable, settings/runtime change, timeout, remote-browse
+constraints, retries, exclusive publication, history rehash and durable IDs.
+Frozen engine/workbench/ComfyUI/TextEdit tests not expanded.
+
+python3 -m unittest discover -s plugins/toolkit/modules/downloads -p 'test_*.py'
+13/13 PASS (0.330 s); real local reader/registration and hardening fixtures.
+PYTHONPATH=plugins/toolkit/config-service python3 -m unittest discover \
+ -s services/download-authorization -p test_authority.py
+5/5 PASS (1.078 s); temporary SQLite/signatures, synthetic callers.
+
+STAGING / HIDDEN ELECTRON
+Orca esbuild: toolkit-window.ts -> /tmp/orca-7b16-window.cjs;
+authority-test-entry.mjs -> /tmp/orca-7b16-authority.cjs; both PASS.
+Stage uses original repository-pinned Node 24.22.1 binary from the 7B-15 downloaded
+runtime, checked by stage.mjs; headers in local node-gyp/24.22.1/include/node.
+New /tmp/orca-7b16-stage/toolkit-host, test-only ad-hoc seal: PASS.
+No production enrollment, notarization, install, or real configuration migration.
+Exact runnable commands are in toolkit-host-7b16-tests.md.
+
+ORCA_BACKGROUND_LAUNCH=1 node scripts/test-host-accounts-downloads.cjs ../orca \
+ /tmp/orca-7b16-stage/toolkit-host /tmp/orca-7b16-window.cjs /tmp/orca-7b16-authority.cjs
+PASS, exit 0. Actual hidden macOS Electron/main/production preload: account
+masking/usage/switch/disable/enable/disconnect/reconnect and full process restart;
+remote browser fixture; actual 16 B and 32 MiB files; pause/resume/retry/dedup,
+request ID persistence, checksum retry, cleanup failures and account/download
+isolation. Actual SSHSIG/Ed25519/SQLite. Account RPC, remote directory RPC,
+SSH byte transport, service identity, confirmation/dialog/Finder routes injected.
+Current run screenshots inspected (runner retains historical filenames):
+ /tmp/toolkit-accounts-7b15.png, /tmp/toolkit-downloads-7b15.png.
+Shown B selected with B's usage and A unknown; completed files checksum verified;
+cancelled file retained as cancelled. No native desktop dialog/TCC acceptance.
+
+node scripts/test-host-recovery.cjs /tmp/orca-7b16-authority.cjs
+9/9 PASS, exit 0, 27,659.7 ms. Real local Host lifecycle/SQLite/receipts;
+remote management/ranges injected, no network evidence.
+node scripts/test-download-large.cjs
+PASS, exit 0: real 1 GiB local destination, eight range workers, full SHA-256
+publication/restart rehash; synthetic source/ranges, no SSH/VPS.
+
+SOURCE / DELIVERY
+python3 scripts/check.py — PASS: 282 source/documentation files, no private runtime files or recognized credentials.
+Both repos git diff --check and Markdown formatting checked.
+Final Orca gate, run after commit immediately before push:
+ ORCA_BACKGROUND_LAUNCH=1 pnpm check:changed \
+  --base=baseline/installed-1.4.249 --maxWorkers=2
+Exact final gate result and paired commit heads are recorded in both Draft PRs.
+No hooks bypassed, PR base changes, main edits, merges or upstream writes.
+pnpm's incidental package-manager lockfile change discarded, not delivered.
+
+ACCEPTANCE BOUNDARY
+Real remote A01-A09 / D01-D09 / real H01-H04: NOT RUN, no independent resources.
+No real credentials read, production SSH/VPS contacted, production app installed,
+or existing real configuration imported. Existing 7B-15 implementation retained.
+Frozen engines/ComfyUI/workbench/TextEdit unchanged; Windows not a target.
+Host admission/enrollment, signed/notarized production package, native TCC/dialog,
+true account/VPS network behavior, and independent security review remain open.
+RELEASE BLOCKED.

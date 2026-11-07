@@ -116,7 +116,7 @@ class BlenderTests(unittest.TestCase):
         self.exe.write_bytes(original)
         link=self.root/'Blender.app';link.symlink_to(self.app)
         with self.assertRaises(ValueError):executable(link)
-        for version, expected in [('Blender 3.6.9','unsupported'),('Blender 4.2.0','available'),('Blender 5.2.1','available'),('Blender 5.2.0 Alpha','unsupported')]:
+        for version, expected in [('Blender 3.6.9','unsupported'),('Blender 4.2.0','available'),('Blender 5.2.1','available'),('Blender 5.2.3 LTS','available'),('Blender 5.2.3 LTS Beta','unsupported'),('Blender 5.2.0 Alpha','unsupported')]:
             self.run.return_value.stdout=version+'\n'
             self.assertEqual(self.control.status()['state'],expected)
 

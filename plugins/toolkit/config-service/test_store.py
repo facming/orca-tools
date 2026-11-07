@@ -95,6 +95,121 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'epoch'):
             self.store.handle(501,self.patch(base,['gpu','enabled'],False))
 
+    def test_host_task_ownership_restart_transitions_and_restore(self):
+        base = self.store.read('settings')
+        backup = self.store.backup()
+        target = {k: DEFAULTS['settings']['downloads'][k] for k in ('environment','sshHost','sshUser','sshPort')}
+        identity = dict(task_id='b'*32, owner='c'*32, epoch=base['epoch'], store_id=base['store_id'])
+        create = request('task-create', **identity, target=target)
+        task = self.store.handle(501, create)
+        self.assertEqual(task['state'], 'created')
+        self.assertEqual(self.store.handle(501, create), task)
+        self.store.close(); self.store = ConfigStore(self.root)
+        with self.assertRaisesRegex(ValueError, 'ownership'):
+            self.store.handle(501, request('lease-release', task_id='b'*32))
+        with self.assertRaisesRegex(ValueError, 'owner'):
+            self.store.handle(501, request('task-update', **{**identity, 'owner':'d'*32}, revision='1', state='running', released=False))
+        with self.assertRaisesRegex(ValueError, 'cleanup'):
+            self.store.handle(501, request('task-update', **identity, revision='1', state='running', released=True))
+        for revision, state in [('1','running'), ('2','paused'), ('3','running'), ('4','complete')]:
+            self.store.handle(501, request('task-update', **identity, revision=revision, state=state, released=False))
+            with self.assertRaisesRegex(ValueError, 'lease'):
+                self.store.handle(501, request('restore', **backup))
+            with self.assertRaisesRegex(ValueError, 'lease'):
+                self.store.handle(501, self.patch(base, ['downloads','sshHost'], 'other'))
+        with self.assertRaisesRegex(ValueError, 'revision'):
+            self.store.handle(501, request('task-update', **identity, revision='4', state='cancelled', released=True))
+        self.store.handle(501, request('task-update', **identity, revision='5', state='complete', released=True))
+        restored = self.store.handle(501, request('restore', **backup, epoch=base['epoch'], store_id=base['store_id']))
+        self.assertNotEqual(restored['epoch'], base['epoch'])
+        with self.assertRaisesRegex(ValueError, 'epoch'):
+            self.store.handle(501, request('task-create', **{**identity, 'task_id':'e'*32}, target=target))
+        with self.assertRaisesRegex(ValueError, 'epoch'):
+            self.store.handle(501, request('restore', **backup, epoch=base['epoch'], store_id=base['store_id']))
+
+    def test_claim_fences_old_owner_and_concurrent_claims_without_releasing(self):
+        from concurrent.futures import ThreadPoolExecutor
+        base = self.store.read('settings')
+        identity = dict(task_id='a'*32, owner='b'*32, epoch=base['epoch'], store_id=base['store_id'])
+        target = {k: DEFAULTS['settings']['downloads'][k] for k in ('environment','sshHost','sshUser','sshPort')}
+        self.store.handle(501, request('task-create', **identity, target=target))
+        self.store.handle(501, request('task-update', **identity, revision='1', state='running', released=False))
+        self.store.close(); self.store = ConfigStore(self.root)
+        def claim(owner):
+            try:
+                return self.store.handle(501, request('task-claim', **{**identity, 'owner':owner}, previous_owner='b'*32, revision='2'))
+            except ValueError:
+                return None
+        with ThreadPoolExecutor(2) as pool:
+            results = list(pool.map(claim, ['c'*32, 'd'*32]))
+        winner = [r for r in results if r]
+        self.assertEqual(len(winner), 1)
+        self.assertEqual(winner[0]['state'], 'paused')
+        self.assertFalse(winner[0]['released'])
+        self.assertEqual(len(self.store.status()['target_leases']), 1)
+        with self.assertRaisesRegex(ValueError, 'owner'):
+            self.store.handle(501, request('task-update', **identity, revision='3', state='cancelled', released=True))
+
+    def test_legacy_adoption_requires_existing_lease_and_keeps_inventory_barrier(self):
+        base = self.store.read('settings')
+        target = {k: DEFAULTS['settings']['downloads'][k] for k in ('environment','sshHost','sshUser','sshPort')}
+        adopt = request('task-adopt', task_id='a'*32, owner='b'*32, epoch=base['epoch'], store_id=base['store_id'], target=target)
+        with self.assertRaisesRegex(ValueError, 'Legacy lease'):
+            self.store.handle(501, adopt)
+        self.store.handle(501, request('lease-acquire', task_id='a'*32, target=target))
+        self.store.db.execute("UPDATE meta SET value='legacy-review-required' WHERE key='task_inventory'")
+        result = self.store.handle(501, adopt)
+        self.assertEqual(result['state'], 'paused')
+        self.assertFalse(result['released'])
+        self.assertEqual(self.store.handle(501, adopt), result)
+        self.assertEqual(self.store.status()['task_inventory']['state'], 'legacy-review-required')
+        with self.assertRaisesRegex(ValueError, 'ownership'):
+            self.store.handle(501, request('lease-release', task_id='a'*32))
+
+    def test_offline_recovery_never_trusts_an_old_empty_inventory(self):
+        from recover import recover
+        from unittest.mock import patch
+        backup = self.store.backup()
+        base = self.store.read('settings')
+        target = {k: DEFAULTS['settings']['downloads'][k] for k in ('environment','sshHost','sshUser','sshPort')}
+        self.store.handle(501, request('task-create', task_id='a'*32, owner='b'*32,
+                                      epoch=base['epoch'], store_id=base['store_id'], target=target))
+        self.store.close()
+        output = self.root / 'recovered'
+        # Temp ancestry is not a production installation; the actual DB/lock is exercised.
+        with patch('recover.protected_ancestors'):
+            recover(self.root, backup['backup_id'], output)
+        restored = ConfigStore(output)
+        try:
+            self.assertNotEqual(restored.status()['epoch'], base['epoch'])
+            self.assertEqual(restored.status()['task_inventory']['state'], 'legacy-review-required')
+            with self.assertRaisesRegex(ValueError, 'Legacy'):
+                restored.handle(501, self.patch(restored.read('settings'), ['downloads','environment'], 'other'))
+        finally:
+            restored.close()
+            self.store = ConfigStore(self.root)
+        self.assertEqual(len(self.store.status()['target_leases']), 1)
+
+    def test_upgrade_does_not_infer_empty_legacy_inventory(self):
+        self.store.db.execute("DELETE FROM meta WHERE key='task_inventory'")
+        self.store.db.execute('DROP TABLE host_tasks')
+        self.store.close(); self.store = ConfigStore(self.root)
+        self.assertEqual(self.store.status()['task_inventory']['state'], 'legacy-review-required')
+        with self.assertRaisesRegex(ValueError, 'Legacy'):
+            self.store.handle(501, self.patch(self.store.read('settings'), ['downloads','environment'], 'new'))
+
+    def test_concurrent_task_creation_and_target_change_never_split_target(self):
+        from concurrent.futures import ThreadPoolExecutor
+        base = self.store.read('settings')
+        target = {k: DEFAULTS['settings']['downloads'][k] for k in ('environment','sshHost','sshUser','sshPort')}
+        create = request('task-create', task_id='f'*32, owner='c'*32, epoch=base['epoch'], store_id=base['store_id'], target=target)
+        def attempt(r):
+            try: return self.store.handle(501, r)
+            except ValueError: return None
+        with ThreadPoolExecutor(2) as pool:
+            results = list(pool.map(attempt, [create, self.patch(base, ['downloads','environment'], 'changed')]))
+        self.assertEqual(sum(r is not None for r in results), 1)
+
     def test_corruption_permissions_and_missing_never_reset(self):
         self.store.close()
         database=self.root/'state.sqlite';original=database.read_bytes()

@@ -14,3 +14,5 @@
 Accounts 卡片上的 **Disable account** 可防止误选；**Enable account** 恢复选择。禁用状态按远程环境和账号 ID 保存在本机 `account-preferences.json`，重启后保留，后端同样拒绝切换至禁用账号。它仅约束 Toolkit 内的切换，不删除登录、不结束已有会话，也不限制 Orca 其他入口。
 
 修改 GPU 管理页面后运行 `node scripts/build-toolkit-ui.cjs` 同步插件内的模块片段，再运行 Toolkit 测试。没有前端依赖、iframe 或额外构建服务。更新插件后在 Orca 刷新列表并按提示审核；无需重启电脑、重新登录账号或重启 GPU 服务。
+
+macOS 配置使用隔离 SQLite 服务和可信 Orca Host 通道。Settings 提供版本化保存、迁移预览/确认、备份/恢复与结果；配置维护也可通过 `toolkit.configuration` 的结构化参数调用。当前 Orca 1.4.249 缺可信 Host 接口，会显示 `host-required`，不能读写真实服务，也不会回退旧 JSON。具体接口和 Host 必须完成的签名/执行隔离改动见 [7B-5 宿主集成](../../docs/macos-orca-host-integration.md)。Windows 继续使用原 JSON 配置。

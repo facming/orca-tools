@@ -1,0 +1,117 @@
+7B-10 evidence — 2026-11-06 Asia/Shanghai — RELEASE BLOCKED
+Baseline Orca: 531e5684f6f3e1a486fa46d0fbd10d18b30e4589
+Baseline Toolkit: f6f90ce1eeb4af1717bbc80e60d9f94a173c7ace
+
+RECOVERY FAULT MATRIX
+node scripts/test-host-recovery.cjs /tmp/orca-7b10-authority.cjs
+9/9 PASS. Real SQLite Host store, files and Ed25519 receipt verification;
+synthetic Host identity, endpoint registration and byte-range transport.
+- Host create commits, subsequent local write fails: stable intent and retry ID.
+- Host create commits, response lost: restart claims inventory, forged complete
+  flags become paused/unverified; forged metadata cannot publish a file.
+- Download completes, revoke times out: lease/key retained; same challenge retry.
+- Revoke succeeds, Host release reply lost: receipt survives, new owner claims
+  released record, offline proof revalidation removes local private key.
+- Host release succeeds, process exits before key deletion: same restart cleanup.
+- Repeated cancel, cleanup and concurrent duplicate creates are idempotent.
+- Two independent claimants: one CAS winner; orphan/old authorization retains lease.
+- Forged receipt cannot delete keys even with an authoritative released record.
+- Former owner terminal retry is rejected after another Host claims the task.
+
+REGISTRATION REPLY LOSS / EXISTING DOWNLOADS
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+106 tests: 105 PASS, 1 existing Windows-only skip, 0 failures.
+Includes actual SSHSIG registration and Ed25519 metadata against disposable
+remote-authority SQLite: commit then lost response, same registration recovery;
+pause/restart/final checksum, lost revoke reply, malformed/stale proof, initial
+persistence failure, symlink protection and macOS localhost download denial.
+Windows-compatible tests pass on macOS; this is not Windows hardware acceptance.
+
+NATIVE HOST / CONFIGURATION
+TOOLKIT_SOCKETPAIR_SOURCE=/Users/apple/Documents/ChatGPT/orca/native/toolkit-host/socketpair.c
+TOOLKIT_AUTHORITY_BUNDLE=/tmp/orca-7b10-authority.cjs
+python3 -m unittest discover -s plugins/toolkit/config-service -p 'test_*.py'
+25/25 PASS. Real socketpair/FD3/SCM_RIGHTS/Security.framework and SQLite.
+Ad-hoc fixture identities; not packaged production identity acceptance.
+Expected malformed ancillary-data warning in negative test.
+PYTHONPATH=plugins/toolkit/config-service python3 -m unittest discover \
+  -s services/download-authorization -p 'test_authority.py'
+5/5 PASS.
+python3 -m unittest discover -s plugins/toolkit/modules/downloads -p 'test_*.py'
+13/13 PASS.
+
+GPU / OTHER TOOLS
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+301 tests: 298 PASS, 3 existing platform skips, 0 failures.
+Blender/Godot/Unity/ComfyUI and bridge coverage retained. Expected invalid-workflow
+tracebacks are negative diagnostics. No actual hardware/application acceptance.
+
+docker run --rm --network none -v /Users/apple/Documents/ChatGPT/orca-tools:/src:ro \
+  orca-security-test:7b3 python3 services/download-authorization/test_isolation.py
+PASS actual Linux cross-UID DB/WAL/SHM/key isolation, forced-command SSH/ranges,
+host-key pin denial, live-read drain barrier, concurrent registration/revocation,
+durable tombstones/restart and offline corruption recovery.
+No external network. Not macOS packaged Host/service cross-UID acceptance.
+
+RENDERED UI
+node scripts/test-host-panel.cjs ../orca
+PASS headless Chromium 1000x900 + disposable SQLite.
+ORCA_BACKGROUND_LAUNCH=1 node scripts/test-host-electron.cjs ../orca \
+  /tmp/orca-7b10-final/toolkit-host /tmp/orca-7b10-window.cjs /tmp/orca-7b10-authority.cjs
+PASS actual hidden Electron BrowserWindow, production main/preload/staged engine:
+preview/import, Cancel/Allow, edit, backup/restore, remote project/directory/file
+selection, remembered directory/default folder, picker cancellation, recovery
+retry/orphan display, leased-target disabling, owner redaction, invalid actions
+and second-WebContents rejection. Native dialog answers, remote SDK/listings and
+Host identity are injected. No real VPS or visible/focused window.
+Screenshot: /tmp/toolkit-host-electron-7b10.png, visually inspected.
+Required electron skill still unavailable in local catalogs; custom driver is
+supplemental evidence, not that skill's certification.
+
+ORCA CHECKS
+ORCA_BACKGROUND_LAUNCH=1 pnpm test src/main/toolkit \
+ src/main/plugins/workers/plugin-worker-supervision.integration.test.ts \
+ src/main/menu/register-app-menu.test.ts --maxWorkers=2
+62 PASS, 1 existing platform skip, 6 files.
+ORCA_BACKGROUND_LAUNCH=1 pnpm check:changed \
+ --base=baseline/installed-1.4.249 --maxWorkers=2
+22/22 PASS at implementation checkpoint; repeat after final staging before push.
+Includes all three typechecks, lint/format, import boundaries, quality/ratchets
+and selected unit suites. No --no-verify or relaxed gate.
+python3 scripts/check.py / git diff --check: PASS.
+
+BUILD / SIGNING
+Pinned Node 24.22.1 and pnpm 12.14.0.
+Orca main target built successfully with the repository electron-vite pipeline.
+Stage + seal - --test-only + smoke-worker: PASS, real separate Node worker IPC.
+Ad-hoc service bundle built with build-security-bundle.py --signing-identity -.
+These are temporary signatures, not a signed accepted app or installed service.
+security find-identity -v -p codesigning: 0 valid identities. No formal signing
+or notarization attempts. Formal checker rejects staging without Contents/Info.plist.
+
+READ-ONLY INSTALLED APP AUDIT (NOT THIS FORK)
+/Applications/Orca.app 1.4.249, com.stablyai.orca, arm64.
+Developer ID Application: Lovecast LLC (6CX3WHS9HZ), hardened runtime.
+CDHash e0d21b44a0044297ce6306ab8295829c4a85bbf8; stapler validate PASS.
+ASAR integrity metadata present; Toolkit opt-in and manifest absent.
+Fuse version 1, values 101100011; main allows DYLD environment variables and
+unsigned executable memory. Does not meet Toolkit Host admission requirements.
+No installed files were changed for this audit.
+
+LIMITS / USER DIRECTION
+User accepts local temporary signing and defers Developer ID/notarization.
+User subsequently deferred installation to a later step. No application or
+service was installed, changed, stopped or backed up. Temporary source experiments
+for local runtime installation were removed; only 7B-10 changes remain.
+No real configuration migration or production VPS connection is authorized.
+Local usable-app acceptance, formal app signing, x64/Rosetta and macOS cross-UID
+acceptance are not claimed. Orphan/legacy/unprovable registration cleanup still
+requires review; no automatic lease release. RELEASE BLOCKED remains.
+
+INITIAL FAILURES RESOLVED
+- Legacy macOS HTTP tests expected a working old controller/picker: replaced
+  with Host-only denial coverage; AppleScript interpreter checks retained directly.
+- Browser UI fixture needed promisify-compatible execFile output; fixed fixture,
+  then actual hidden Electron browse/persistence checks passed.
+- Recovery fixture initially used wrong hardcoded payload byte count (14 vs 15);
+  corrected fixture, all nine failure-path tests passed.

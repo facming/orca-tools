@@ -33,6 +33,7 @@ def recover(state, backup, output):
                 source.backup(target)
                 target.execute('PRAGMA synchronous=EXTRA');target.execute('PRAGMA fullfsync=ON')
                 target.execute("UPDATE meta SET value=? WHERE key='epoch'",(uuid.uuid4().hex,))
+                target.execute("INSERT OR REPLACE INTO meta VALUES('task_inventory','legacy-review-required')")
                 target.execute('DELETE FROM requests')  # old epoch acknowledgments cannot be reused
                 target.commit()
                 if target.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise ValueError('Recovery verification failed')

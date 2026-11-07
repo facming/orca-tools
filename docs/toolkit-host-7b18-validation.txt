@@ -1,0 +1,100 @@
+7B-18 | 2026-11-07 Asia/Shanghai | existing Mac + vps01 + System Default
+
+REAL ENVIRONMENT
+- Actual hidden Electron development Host, production download engine, existing
+  Orca RPC/SSH connection, actual VPS authority/loopback reader. No mock bytes.
+- 1 GiB random file: 1,073,741,824 bytes.
+  Source SHA-256: a1f98496d56d2c0c481ffc6a9ff59c50f8fa20500449b3aed3c41436cd72166b
+  Task: 2b136d6a74204cfe8efc1f1033f7fd0d; eight parallel reader connections.
+- Pause saved 100,663,296 bytes; Resume reused verified ranges.
+- SIGTERM only the owned development tunnel: automatic tunnel reconstruction and
+  automatic range retries recovered without clicking Resume.
+- Stop development entry while downloading: saved paused state and 167,772,160
+  durable bytes; supervisor exited in about one second. Further rebuild/restarts
+  recovered 301,989,888 and 532,676,608 durable bytes. No lost task or overwritten
+  destination. Restart deliberately stays paused until Resume.
+- Interrupted only an authorization CLI child owned by this Electron process.
+  Stable signed registration/request ID retried automatically. Final 1 GiB run
+  recorded retry count increase 40 -> 41 and entered downloading without Resume.
+- Actual TimeoutError under VPS authority contention was found and separated from
+  permission rejection. Whole-file hashing for every range was removed: initial
+  full digest + per-read block verification, bounded process-local cache.
+- Existing account refresh returned one account, active system-default, with
+  session/weekly usage. No account selection/login/credential edits were made.
+- Duplicate launch: reports already running; no second Host or borrowed tunnel.
+- Existing download authority only was updated. Default sshd, firewall, installed
+  Orca application and other Claude processes were not changed. Download export
+  quota increased from 256 MiB to 2 GiB on the existing service.
+
+AUTOMATED CHECKS (not replacements for the VPS run)
+- Download Node suites: 37 passed, 1 skipped (38 total; platform-specific case).
+- Authority Python: 6 passed, including cross-block bytes and changed staging
+  content with restored mtime rejection after cache warmup.
+- Host lifecycle/reconciliation: 9 passed; real SQLite and signatures with injected
+  endpoint/range responses.
+- Hidden Electron 1000x900: PASS. Actual window/preload/Host; dialog, account and
+  range responses synthetic. Initial ad-hoc build omitted the required external
+  process-host module and failed its editor fixture; correct harness build passed.
+- Staged Downloads UI: PASS (synthetic backend, actual DOM/render).
+- Local 1 GiB large test: PASS (synthetic network bytes, real disk/hash/restart).
+- History: 1,003 records (3 x 64 MiB + 1,000 small files), ready 106 ms,
+  list max 5 ms, peak RSS 76 MiB, close 1 ms; graceful and SIGKILL rehash passed.
+- Source/credential scan: PASS. Python compilation: PASS.
+- Orca initial full changed gate: unit tests/typechecks passed; six missing-brace
+  lint findings corrected before final gate. Final gate result below.
+
+FINAL REAL RESULT | 2026-11-07 09:27 Asia/Shanghai
+- 1 GiB COMPLETE, verified=true. Independent macOS shasum matches the full
+  source digest above exactly. Additional 8 MiB task also completed and verified.
+- Final stable samples: approximately 4-5 MiB/s. Final resumed phase started at
+  532,676,608 bytes; 177 seconds later 939,524,096 bytes were present (about
+  2.19 MiB/s inclusive of authorization retry, connection waits and lost ranges).
+  Total retries 51 include deliberate interruption and pre-fix contention; this
+  is not a claim of a clean uninterrupted benchmark.
+- Both new task receipts: signed REVOKED + DRAINED, persisted and verified.
+- Independent VPS read-only SQLite check: both tasks REVOKED, zero read leases.
+- Both local task key directories absent; partial files absent; completed files
+  retained. Host task states complete/released and target leases checked locally.
+- Development screenshot and detailed five-second samples remain in the private
+  development state directory, not in git (contain local filesystem paths).
+- Final Orca gate command: pnpm check:changed
+  --base=baseline/installed-1.4.249 --maxWorkers=2. Outcome reported in Draft PR.
+
+
+7B-18 FREEZE / DAILY-USE HANDOFF | 2026-11-07 Asia/Shanghai
+- Status: real-environment account and download core acceptance PASSED.
+  Scope: existing System Default account refresh/usage and actual VPS transfers;
+  no claim of a second-account switch or every historical acceptance matrix item.
+- Frozen code: Orca 9cf8fc8158398aeb863e0f642d91b41629d06e5e;
+  Toolkit 4df60d2cd711d2ccc5fadeb3589747a13b5651d5. Later handoff commits
+  change documentation only. Original local pnpm-lock.yaml change preserved.
+- Exact existing development files archived, not rebuilt. 34 payload files;
+  all 25 sealed Host manifest entries match. External runtime dependencies
+  documented separately; this is a local snapshot, not a portable installer.
+- Archive: orca-toolkit-dev-7B-18-20261107-arm64.tar.gz, 39,649,399 bytes.
+  SHA-256: 4e58af6e2b62b078daa7a0ff677ad77c40ea09e3bdb8b0569495740884a576c0
+- launch.command and stop.command: shell syntax PASS; executed via env -i
+  with HOME/USER/LOGNAME and system-only PATH, from /private/tmp and /.
+  No background flag, CDP, fixture server or manual tunnel was required.
+- Actual visible Development window loaded; existing System Default account,
+  usage and download history visible. Live Toolkit ready logged; no traceback
+  or uncaught exception. Duplicate launch refused a second instance.
+- stop.command: normal exit 0; control.sock removed; owned port 22468 released.
+  Stop before startup and repeated stop after shutdown both returned not running.
+  Installed Orca PID remained alive. No active transfer was started in this
+  closeout; downloading-stop durability evidence remains the original run above.
+- Before/after read-only comparison: 8,038 installed Orca regular files equal;
+  selected existing profile domains including settings/sshTargets equal;
+  29 remote files equal (including one Claude credential file and five Claude
+  JSON files in total); 27 running VPS services retained state, PID and start time.
+  No production config changes, remote writes, service restarts or account edits.
+- Prior final Orca gate confirmed from saved log: all 41 checks passed in 72.9 s.
+  Closeout does not rerun or expand the test framework; changes are documentation.
+- Both PRs remain Open/Draft, original bases preserved, auto-merge disabled.
+  No merge/main change/upstream push. Other engines and prior evidence preserved.
+- Follow-up policy: fix concrete daily-use feedback only; no proactive feature,
+  architecture or test-framework expansion. See toolkit-host-7b18-daily-use.md.
+- Closeout checks: archive SHA256SUMS passed; all 34 archived payload entries
+  re-read from tar and verified against their recorded size/SHA-256. Independent
+  1 GiB destination SHA-256 still matches the original real VPS digest above.
+  Updated documentation local links, whitespace and source/credential scan passed.

@@ -3,6 +3,8 @@ const {ToolkitError} = require('../platform/errors.cjs');
 const {createRemoteClient,remoteAccountError}=require('../remote-runtime.cjs');
 function maskedEmail(value){if(typeof value!=='string')return '***';const match=value.match(/^([^@\s]+)@([^@\s]+)$/);return match?match[1][0]+'***@'+match[2]:'***';}
 function timestamp(value){if(typeof value==='number'&&Number.isFinite(value))return value;if(typeof value==='string'&&/^\d{4}-\d\d-\d\dT/.test(value)&&Number.isFinite(Date.parse(value)))return new Date(value).toISOString();return null;}
+const SYSTEM_DEFAULT='system-default';
+function systemBinding(result){const s=result?.claude,t=result?.rateLimits?.claudeTarget;return s?.activeAccountId===null&&s.activeAccountIdsByRuntime?.host===null&&t?.runtime==='host'&&t.wslDistro==null;}
 function snapshotBinding(result,id){
  const state=result.claude,account=Array.isArray(state?.accounts)?state.accounts.find(a=>a.id===id):null,target=result.rateLimits?.claudeTarget;
  if(!account||state.activeAccountId!==id||!target)return false;
@@ -10,8 +12,8 @@ function snapshotBinding(result,id){
  return account.managedAuthRuntime==='wsl'&&typeof account.wslDistro==='string'&&account.wslDistro.length>0&&target.runtime==='wsl'&&target.wslDistro===account.wslDistro&&state.activeAccountIdsByRuntime?.wsl?.[account.wslDistro]===id;
 }
 function missingProvenance(usage){return usage?.usageMetadata?.authProvenance==null;}
-function usageDetails(result,id,verifiedActiveId){
- const limits=result.rateLimits||{},active=id===result.claude.activeAccountId;
+function usageDetails(result,id,verifiedActiveId,strictProvenance){
+ const limits=result.rateLimits||{},system=id===SYSTEM_DEFAULT,active=system?systemBinding(result):id===result.claude.activeAccountId;
  const candidate=active?limits.claude:limits.inactiveClaudeAccounts?.find(a=>a.accountId===id)?.rateLimits;
  const updatedAt=timestamp(candidate?.updatedAt),fail=candidate?.usageMetadata?.failureKind;
  const empty=(code,message)=>({usage:null,usageStatus:{code,state:['unavailable','not-reported','unverified-account'].includes(code)?'unknown':'error',message,updatedAt}});
@@ -21,11 +23,11 @@ function usageDetails(result,id,verifiedActiveId){
  if(['missing-credentials','unreadable-credentials'].includes(fail))return empty('missing-credentials','Usage credentials are unavailable. Sign in to this account again if needed.');
  if(candidate.status==='error'||candidate.status==='unavailable')return empty('upstream-unavailable','Orca could not retrieve usage. Refresh usage or check this account in Orca.');
  const provenance=candidate.usageMetadata?.authProvenance;
- const explicit=['managed:'+id,'profile:'+id].includes(provenance);
+ const explicit=system?active&&provenance==='system':['managed:'+id,'profile:'+id].includes(provenance);
  // Orca invalidates the target's usage cache on account changes. For older
  // snapshots lacking provenance, verify the selection/target mapping twice.
- const snapshot=active&&missingProvenance(candidate)&&verifiedActiveId===id&&snapshotBinding(result,id)&&candidate.status==='ok'&&!candidate.error;
- if((active&&!explicit&&!snapshot)||(!active&&provenance!=null&&!explicit))return empty('unverified-account','Cannot confirm which account this usage belongs to. Refresh usage to retry.');
+ const snapshot=active&&missingProvenance(candidate)&&verifiedActiveId===id&&(system?systemBinding(result)&&result.claude.accounts.length===0:snapshotBinding(result,id))&&candidate.status==='ok'&&!candidate.error;
+ if((strictProvenance&&!explicit&&!(system&&snapshot))||(active&&!explicit&&!snapshot)||(!active&&provenance!=null&&!explicit))return empty('unverified-account','Cannot confirm which account this usage belongs to. Refresh usage to retry.');
  const clean={updatedAt};let hasUsage=false;
  for(const key of ['session','weekly']){const w=candidate[key],used=w?.usedPercent;clean[key]=w?{usedPercent:typeof used==='number'&&Number.isFinite(used)?Math.max(0,Math.min(100,used)):null,resetsAt:timestamp(w.resetsAt)}:null;if(clean[key]?.usedPercent!=null)hasUsage=true;}
  if(!hasUsage)return empty('not-reported',candidate.status==='fetching'?'Usage is refreshing. Check again shortly.':'Orca has not reported usage windows for this account.');
@@ -33,14 +35,21 @@ function usageDetails(result,id,verifiedActiveId){
  const stale=!Number.isFinite(ms)||Date.now()-ms>5*60000;
  return {usage:clean,usageStatus:{code:'ready',state:stale?'stale':'ready',message:candidate.status==='fetching'?'Refreshing; showing the last reported usage.':stale?'Showing cached usage. Refresh for the latest values.':'',updatedAt,stale,source:snapshot?'runtime-snapshot':'account-bound'}};
 }
-function publicState(result,verifiedActiveId=null){
+function publicState(result,verifiedActiveId=null,strictProvenance=false){
  if(!result?.claude||!Array.isArray(result.claude.accounts))throw new ToolkitError('The remote account response is unavailable.');
  const active=result.claude.activeAccountId;
- return {activeAccountId:typeof active==='string'?active:null,accounts:result.claude.accounts.filter(a=>typeof a.id==='string').map(a=>({id:a.id,email:maskedEmail(a.email),current:a.id===active,needsSignIn:a.needsSignIn===true,...usageDetails(result,a.id,verifiedActiveId)}))};
+ const state= {activeAccountId:typeof active==='string'?active:null,accounts:result.claude.accounts.filter(a=>typeof a.id==='string').map(a=>({id:a.id,email:maskedEmail(a.email),source:'managed',accountType:a.authMethod==='subscription-oauth'?'Claude subscription':'Managed account',current:a.id===active,needsSignIn:a.needsSignIn===true,...usageDetails(result,a.id,verifiedActiveId,strictProvenance)}))};
+ const limits=result.rateLimits?.claude;
+ if(result.claude.systemDefaultEmail||(active===null&&(limits?.status==='ok'||limits?.usageMetadata?.authProvenance==='system'))){
+  const current=systemBinding(result);
+  state.accounts.unshift({id:SYSTEM_DEFAULT,email:result.claude.systemDefaultEmail?maskedEmail(result.claude.systemDefaultEmail):'System default',source:'system-default',current,needsSignIn:false,...usageDetails(result,SYSTEM_DEFAULT,verifiedActiveId,strictProvenance)});
+  if(current)state.activeAccountId=SYSTEM_DEFAULT;
+ }
+ return state;
 }
 class Accounts {
  constructor(runtime,options={}){this.runtime=runtime;this.createClient=options.createClient||(env=>createRemoteClient(runtime,env));this.clients=new Map();this.switching=false;}
- async call(settings,method,params){
+ async call(settings,method,params,identity){
   if(!settings.environment)throw new ToolkitError('Set the remote environment in Toolkit settings.');
   let client=this.clients.get(settings.environment);
   try{
@@ -49,13 +58,22 @@ class Accounts {
    const r=await client.call(method,params);
    if(r?.ok!==true)throw remoteAccountError(r?.error);
    if(typeof r._meta?.runtimeId!=='string'||!r._meta.runtimeId.trim())throw new ToolkitError('Remote accounts RPC is incompatible: runtime identity is missing.');
+   if(identity){if(identity.runtimeId&&identity.runtimeId!==r._meta.runtimeId)throw new ToolkitError('Remote runtime changed. Refresh to confirm the current account.');identity.runtimeId=r._meta.runtimeId;}
    return r.result;
   }catch(error){this.clients.delete(settings.environment);throw error instanceof ToolkitError?error:remoteAccountError(error);}
  }
- async list(settings,refreshUsage=false){
-  const first=await this.call(settings,'accounts.list',{refreshUsage}),id=first?.claude?.activeAccountId,candidate=first?.rateLimits?.claude;
+ async list(settings,refreshUsage=false,identity={}){
+  const state=await this.snapshot(settings,refreshUsage,identity);return {...state,runtimeId:identity.runtimeId,scope:'remote'};
+ }
+ async snapshot(settings,refreshUsage=false,identity={}){
+  const first=await this.call(settings,'accounts.list',{refreshUsage},identity),id=first?.claude?.activeAccountId,candidate=first?.rateLimits?.claude;
+  if(systemBinding(first)&&first.claude.accounts.length===0&&missingProvenance(candidate)&&candidate?.status==='ok'&&!candidate.error){
+   const second=await this.call(settings,'accounts.list',{refreshUsage:false},identity);
+   return publicState(second,systemBinding(second)&&second.claude.accounts.length===0?SYSTEM_DEFAULT:null,true);
+  }
+  if(this.runtime.platform==='darwin')return publicState(first,null,true);
   if(typeof id==='string'&&missingProvenance(candidate)&&candidate?.status==='ok'&&!candidate.error&&snapshotBinding(first,id)){
-   const second=await this.call(settings,'accounts.list',{refreshUsage:false});
+   const second=await this.call(settings,'accounts.list',{refreshUsage:false},identity);
    return publicState(second,snapshotBinding(second,id)?id:null);
   }
   return publicState(first);
@@ -65,15 +83,22 @@ class Accounts {
   if(this.switching)throw new ToolkitError('An account switch is in progress. Refresh shortly.');
   this.switching=true;
   try{
-   const state=await this.list(settings);const account=state.accounts.find(a=>a.id===body.accountId);
-   if(!isCurrent())throw new ToolkitError('Remote connection changed. Refresh before switching.');
+   const identity={};const state=await this.list(settings,false,identity);const account=state.accounts.find(a=>a.id===body.accountId);
+   if(!await isCurrent())throw new ToolkitError('Remote connection changed. Refresh before switching.');
    if(!account)throw new ToolkitError('Account not found. Refresh to try again.');
    if(account.needsSignIn)throw new ToolkitError('Sign in again on the remote host to use this account.');
    if(body.expectedActiveAccountId!==state.activeAccountId)throw new ToolkitError('The active account has changed. Refresh before switching.');
    if(account.current)return state;
-   await this.call(settings,'accounts.selectClaude',{accountId:account.id});
-   const after=await this.list(settings);
-   if(!isCurrent())throw new ToolkitError('Remote connection changed. Refresh to check the selected account.');
+   try{await this.call(settings,'accounts.selectClaude',{accountId:account.id===SYSTEM_DEFAULT?null:account.id},identity);}catch(error){
+    try{const observed=await this.list(settings,false,identity);if(observed.activeAccountId===account.id)await this.call(settings,'accounts.selectClaude',{accountId:state.activeAccountId===SYSTEM_DEFAULT?null:state.activeAccountId},identity);}catch{throw new ToolkitError('Switch could not be confirmed or restored. Refresh the runtime before starting a new session.');}
+    throw error;
+   }
+   let after;
+   try{after=await this.list(settings,true,identity);}catch{
+    try{await this.call(settings,'accounts.selectClaude',{accountId:state.activeAccountId===SYSTEM_DEFAULT?null:state.activeAccountId},identity);}catch{throw new ToolkitError('Switch verification failed; restoring the previous selection could not be confirmed. Refresh before starting a session.');}
+    throw new ToolkitError('Switch verification failed. The previous account selection was restored. Refresh to retry.');
+   }
+   if(!await isCurrent())throw new ToolkitError('Remote connection changed. Refresh to check the selected account.');
    if(after.activeAccountId!==account.id)throw new ToolkitError('Switch not confirmed. Refresh to check the active account.');
    return after;
   }finally{this.switching=false;}

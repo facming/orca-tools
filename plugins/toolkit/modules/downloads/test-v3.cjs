@@ -57,6 +57,8 @@ test('v3 real SSHSIG registration, signed metadata, retry and cleanup against au
  const trust={...invoke('init'),server_id:'server',endpoint_id:'endpoint',account_id:'reader',signing_key_id:'one',hostKey:'ssh-ed25519 U1lOVEhFVElD',host:'100.64.0.20',port:22,worktree:'path:/test'};
  const tr=new SshTransport({dataDir,runtime:{platform:'darwin',keygen:'/usr/bin/ssh-keygen',childEnv:{PATH:process.env.PATH}},environment:'test',sshHost:'100.64.0.20',sshUser:'reader',sshPort:22,execute:promisify(cp.execFile),spawn:cp.spawn});Object.setPrototypeOf(tr,V3Transport.prototype);tr.trust=trust;tr.manage=async r=>invoke('request',r);
  const job={id:crypto.randomUUID().replaceAll('-',''),protocol:3,source};
+ const manage=tr.manage;tr.manage=async request=>{await manage(request);throw Error('registration response lost');};
+ await assert.rejects(tr.prepare(job),/response lost/);Object.assign(job,JSON.parse(fs.readFileSync(path.join(dataDir,'jobs',job.id+'.json'))));tr.manage=manage;
  const meta=await tr.prepare(job);assert.equal(meta.size,7);assert.equal(meta.sha256,crypto.createHash('sha256').update('PAYLOAD').digest('hex'));assert.equal(job.authorizationState,'active');
  assert.deepEqual(await tr.prepare(job),meta);
  t.mock.method(config,'mutate',()=>({released:job.id}));await tr.cleanup(job);assert.equal(job.cleanup_verified,true);assert.equal(fs.existsSync(path.join(tr.directory(job),'key')),false);
@@ -65,7 +67,7 @@ test('v3 real SSHSIG registration, signed metadata, retry and cleanup against au
  // reconstruction. Only range transport is synthetic; registration/receipts use
  // real SSHSIG, Ed25519 and persistent authority SQLite above.
  const {DownloadManager}=require('./engine.cjs');
- const options={dataDir:path.join(root,'manager'),runtime:tr.runtime,environment:'test',sshHost:'100.64.0.20',sshUser:'reader',sshPort:22};
+ const options={dataDir:path.join(root,'manager'),runtime:tr.runtime,environment:'test',sshHost:'100.64.0.20',sshUser:'reader',sshPort:22,hostTasks:{async create(){},async transition(){}}};
  const manager=new DownloadManager(options);let entered;
  const reading=new Promise(resolve=>{entered=resolve;});
  Object.assign(manager.transport,{trust,manage:tr.manage,read:async(_job,_offset,_length,signal)=>{entered();await new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(Error('Paused')),{once:true}));}});
@@ -79,4 +81,71 @@ test('v3 real SSHSIG registration, signed metadata, retry and cleanup against au
  assert.equal(fs.readFileSync(complete.destination,'utf8'),'PAYLOAD');assert.equal(fs.existsSync(path.join(resumed.transport.directory(complete),'key')),false);
  assert.equal(invoke('request',{op:'status',task_id:complete.id}).state,'REVOKED');await resumed.close();
 
+});
+
+test('async Host lease release must finish before deleting task keys; rejection retains them',async t=>{
+ for(const reject of [false,true]){
+  const f=fixture(t);let release;
+  const entered=new Promise(resolve=>{f.tr.runtime={configClient:{mutate:async request=>{assert.equal(request.op,'lease-release');resolve();return new Promise((ok,bad)=>{release=()=>reject?bad(Error('Host offline')):ok({released:f.job.id});});}}};});
+  t.mock.method(config,'mutate',()=>{throw Error('direct Bridge fallback forbidden');});
+  f.tr.manage=async r=>f.sign({...f.payload,request_id:r.request_id,client_nonce:r.client_nonce});
+  const cleanup=f.tr.cleanup(f.job);await entered;assert.ok(fs.existsSync(f.key));release();
+  if(reject){await assert.rejects(cleanup,/Host offline/);assert.ok(fs.existsSync(f.key));}else{await cleanup;assert.equal(fs.existsSync(f.key),false);}
+ }
+});
+
+test('restart re-verifies persisted receipt and retries Host release before deleting keys without network',async t=>{
+ const f=fixture(t);let failed=true;
+ f.tr.endpointOptions={hostTasks:{async transition(id,state,released){assert.equal(id,f.job.id);assert.equal(state,'cancelled');assert.equal(released,true);assert.ok(fs.existsSync(f.key));if(failed)throw Error('Host response lost');}}};
+ f.tr.manage=async r=>f.sign({...f.payload,request_id:r.request_id,client_nonce:r.client_nonce});
+ await assert.rejects(f.tr.cleanup(f.job),/Host response lost/);
+ const saved=JSON.parse(fs.readFileSync(path.join(f.tr.dataDir,'jobs',f.job.id+'.json')));
+ f.tr.manage=async()=>{throw Error('offline; persisted proof must suffice');};
+ const forged=structuredClone(saved);forged.receipt.signature=Buffer.alloc(64).toString('base64');
+ await assert.rejects(f.tr.cleanup(forged),/signature/);assert.ok(fs.existsSync(f.key));
+ failed=false;await f.tr.cleanup(saved);assert.equal(fs.existsSync(f.key),false);
+});
+test('lost remote revoke reply reuses the same nonce and request id, ignoring JSON revoked flags',async t=>{
+ const f=fixture(t);let original;
+ f.job.cleanup_verified=true;f.job.authorizationState='revoked';
+ f.tr.manage=async r=>{original=structuredClone(r);throw Error('reply lost');};
+ await assert.rejects(f.tr.cleanup(f.job),/reply lost/);assert.ok(fs.existsSync(f.key));
+ f.tr.manage=async r=>{assert.deepEqual(r,original);return f.sign({...f.payload,request_id:r.request_id,client_nonce:r.client_nonce});};
+ t.mock.method(config,'mutate',()=>({}));await f.tr.cleanup(f.job);assert.equal(fs.existsSync(f.key),false);
+});
+
+test('remote revocation followed by local key deletion failure retries verified proof offline',async t=>{
+ const f=fixture(t);t.mock.method(config,'mutate',()=>({}));
+ f.tr.manage=async r=>f.sign({...f.payload,request_id:r.request_id,client_nonce:r.client_nonce});
+ const unlink=fs.unlinkSync,mock=t.mock.method(fs,'unlinkSync',file=>{if(file===f.key)throw Object.assign(Error('local denial'),{code:'EACCES'});return unlink(file);});
+ await assert.rejects(f.tr.cleanup(f.job),/local denial/);assert.ok(fs.existsSync(f.key));assert.ok(f.job.receipt);
+ mock.mock.restore();f.tr.manage=async()=>{throw Error('network must not be used');};
+ await f.tr.cleanup(f.job);assert.equal(f.job.authorizationState,'revoked');assert.equal(fs.existsSync(f.key),false);
+});
+test('authorization retries lost replies with the identical registration and stops on denial',async()=>{
+ const tr=Object.assign(Object.create(V3Transport.prototype),{trust:{worktree:'path:/project'},wait:async()=>{}});
+ const commands=[];let disconnected=true;
+ tr.orca=async args=>{
+  if(args[1]==='create'){commands.push(args.at(-1));return {terminal:{handle:'transfer'}};}
+  if(args[1]==='read'&&disconnected){disconnected=false;throw Object.assign(Error('connection lost'),{retryable:true});}
+  if(args[1]==='read')return {terminal:{tail:['ORCA_DOWNLOAD_V3={"payload":"receipt","signature":"signed"}']}};
+  return {};
+ };
+ assert.deepEqual(await tr.manage({op:'register',request_id:'same-request'}),{payload:'receipt',signature:'signed'});
+ assert.equal(new Set(commands).size,1);
+ tr.orca=async args=>args[1]==='create'?{terminal:{handle:'denied'}}:args[1]==='read'?{terminal:{tail:['PermissionError: rejected']}}:{};
+ await assert.rejects(tr.manage({op:'register'}),/authorization rejected/);
+ const controller=new AbortController();controller.abort();
+ await assert.rejects(tr.manage({op:'register'},{signal:controller.signal}),/abort/i);
+});
+
+test('remote authorization timeout traceback retries instead of becoming a permanent denial',async()=>{
+ const tr=Object.assign(Object.create(V3Transport.prototype),{trust:{worktree:'path:/project'},wait:async()=>{}});
+ let timeout=true;
+ tr.orca=async args=>{
+  if(args[1]==='create')return {terminal:{handle:'auth'}};
+  if(args[1]==='read'){const tail=timeout?['Traceback (most recent call last):','TimeoutError: timed out']:['ORCA_DOWNLOAD_V3={"payload":"receipt","signature":"signed"}'];timeout=false;return {terminal:{tail}};}
+  return {};
+ };
+ assert.deepEqual(await tr.manage({op:'register',request_id:'same-request'}),{payload:'receipt',signature:'signed'});
 });

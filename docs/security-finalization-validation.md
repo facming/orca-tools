@@ -82,3 +82,12 @@ remains blocked on host integration and manual acceptance; H-03's previously
 recorded production/legacy risks are not reclassified as resolved. The old
 `reproduce-unresolved-races.py` exercises retired helpers and is not used as a
 success metric. PR remains Draft.
+
+## Stage 7B-5 follow-up
+
+The Toolkit-side asynchronous Host adapter, bounded main-process integration
+component, versioned UI and structured maintenance commands are implemented.
+Installed Orca 1.4.249 still lacks the trusted method and cannot enroll. The real
+SDK probe confirms fail-closed behavior; positive native tests use a synthetic
+signed Host. See [Host integration and required changes](macos-orca-host-integration.md).
+This does not supersede the production release boundary above.

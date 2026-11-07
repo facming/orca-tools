@@ -191,53 +191,37 @@ test('macOS activation shares one runtime, serves local previews and cannot star
     assert.equal(opts.runtime, r);
     return service = await start({...opts, port: 0});
   });
-  await plugin.default({commands: {register: (name, fn) => commands.set(name, fn)}, log() {}});
+  await plugin.default({host:{has:()=>true,async call(method,{request}){return {ok:true,result:require('./config-service/client.cjs').request(request)};}},commands: {register: (name, fn) => commands.set(name, fn)}, log() {}});
   t.after(() => plugin.deactivate());
   assert.equal(openGpu.mock.callCount(), 0);
   assert.equal(service.controller.accounts.runtime, r);
   assert.equal(service.controller.gpu.runtime, r);
   assert.equal(commands.size, 6);
   assert.equal(typeof commands.get('toolkit.configuration'), 'function');
-  assert.equal(commands.get('toolkit.configuration')({operation:'status'}).state, 'ready');
+  assert.throws(()=>commands.get('toolkit.configuration')({operation:'status'}));
   const {url} = service;
   assert.equal(new URL(url).hostname, '127.0.0.1');
-  for (const name of ['accounts', 'downloads']) {
-    await commands.get('toolkit.' + name)({});
-    assert.equal(launched.at(-1), url + '#' + name);
-    assert.equal((await fetch(url + name + '/')).status, 200);
+  for (const name of ['open', 'accounts', 'downloads', 'gpu', 'pause-downloads']) {
+    await assert.rejects(commands.get('toolkit.' + name)({}));
   }
-  await commands.get('toolkit.gpu')({});
-  assert.equal(launched.at(-1), url + '#workflows');
+  assert.deepEqual(launched, []);
   const html = await (await fetch(url)).text();
   const headers = {'X-Toolkit-Token': html.match(/const token='([a-f0-9]+)'/)[1], Origin: new URL(url).origin, 'Content-Type': 'application/json'};
   const state = await (await fetch(url + 'api/status', {headers})).json();
-  assert.deepEqual(Object.values(state.modules).map(m => m.status), ['preview', 'needs-setup', 'offline']);
+  assert.deepEqual(Object.values(state.modules).map(m => m.status), ['preview', 'host-required', 'offline']);
   openGpu.mock.restore();
   for (const [route, method] of [['downloads/jobs', 'POST'], ['gpu/open', 'POST'], ['gpu/native', 'GET']]) {
     const response = await fetch(url + 'api/' + route, {method, headers, body: method === 'POST' ? '{}' : undefined});
-    assert.equal(response.status, 400);
-    assert.match((await response.json()).error, route.startsWith('downloads')?/Configure/:/macOS/);
+    assert.equal(response.status, route.startsWith('downloads')?403:400);
+    assert.match((await response.json()).error, route.startsWith('downloads')?/Host/:/macOS/);
   }
   assert.equal((await (await fetch(url + 'api/accounts', {headers})).json()).requiresRefresh, true);
   const post = (route, body) => fetch(url + 'api/' + route, {method: 'POST', headers, body});
   const malformed = await post('settings', 'fixture-sensitive-input');
   assert.deepEqual(await malformed.json(), {error: 'Toolkit could not complete this request.'});
-  const selected = path.join(f.home, '测试 folder');
-  fs.mkdirSync(selected);
-  const choose = async () => post('downloads/choose-folder', '{}');
-  r.chooseDirectory = async () => ({cancelled: false, path: selected});
-  assert.equal((await choose()).status, 200);
-  const preference = path.join(r.configDir, 'downloads-preferences.json');
-  const readPreference=()=>require('./config-service/client.cjs').request({op:'read',namespace:'downloads-preferences'}).raw_json;
-  const previous = readPreference();
-  assert.equal(fs.existsSync(preference),false);
-  r.chooseDirectory = async () => ({cancelled: true});
-  assert.deepEqual(await (await choose()).json(), {cancelled: true});
-  assert.deepEqual(readPreference(), previous);
   const jobs = await (await fetch(url + 'api/downloads/jobs', {headers})).json();
-  assert.equal(jobs.defaultFolder, selected);
   assert.deepEqual(jobs.jobs, []);
-  assert.equal(jobs.availability.status, 'needs-setup');
+  assert.equal(jobs.availability.status, 'host-required');
   assert.equal(service.controller.downloads, null);
   assert.equal(openGpu.mock.callCount(), 0);
   await plugin.deactivate();

@@ -1,0 +1,106 @@
+7B-9 evidence — 2026-11-06 Asia/Shanghai — RELEASE BLOCKED
+
+Baselines: Orca efc2d55fd7f9459478cbd9965c1dd7a7f18dfd31
+           Toolkit a4451cee33ae4b86b43e2d278012e7da9c7f5134
+No production install, real config import, VPS connection, main edit or merge.
+
+PRODUCTION CODE
+Menu -> packaged runtime admission -> actual maintenance window -> dedicated
+sender/mainFrame-bound IPC -> sealed engine -> main ToolkitTasks -> isolated
+service. Windows legacy UI/transport and GPU engine implementations unchanged.
+The production trust gate remains active; production signed deployment NOT run.
+
+FINAL COMMANDS / RESULTS
+Toolkit:
+node --test plugins/toolkit/test*.cjs plugins/toolkit/modules/downloads/test*.cjs
+  106 tests: 105 pass, 1 existing Windows-only skip, 0 fail.
+  Includes real SSHSIG/Ed25519/authority SQLite, registration reply loss,
+  persisted proof revalidation, rejected forgery, lost revoke reply stable nonce,
+  asynchronous Host release before deletion, pause/restart/abnormal exit.
+
+TOOLKIT_SOCKETPAIR_SOURCE=/absolute/orca/native/toolkit-host/socketpair.c
+TOOLKIT_AUTHORITY_BUNDLE=/tmp/orca-7b9-authority.cjs
+python3 -m unittest discover -s plugins/toolkit/config-service -p 'test_*.py'
+  25/25 pass (no skips). Native negative ancillary data emits an expected warning.
+  Actual socketpair/FD3/SCM_RIGHTS/Security.framework/SQLite; fixture CDHashes only.
+  Main handle ownership, engine lifecycle, unknown create after service commit,
+  reconstruction with forged local completion flags, stale owner rejection,
+  duplicate create UUID, replay, CAS claims, legacy adoption and restore barriers.
+
+PYTHONPATH=plugins/toolkit/config-service python3 -m unittest discover \
+  -s services/download-authorization -p 'test_authority.py'
+  5/5 pass.
+python3 -m unittest discover -s plugins/toolkit/modules/downloads -p 'test_*.py'
+  13/13 pass (range checks, forced command, permissions, legacy cleanup).
+python3 -m unittest discover -s services/local-gpu-bridge -p 'test_*.py'
+  301 tests: 298 pass, 3 existing Windows-specific skips, 0 failures.
+  Expected invalid-workflow diagnostics are emitted by negative tests.
+
+Docker (existing orca-security-test:7b3 image, no external network):
+docker run --rm --network none -v /absolute/orca-tools:/src:ro \
+  orca-security-test:7b3 python3 services/download-authorization/test_isolation.py
+  PASS real UID DB/journal/program/signing-key isolation, unauthorized IPC
+  PASS actual sshd reads, forced-command shell/PTY/range rejection, host pin
+  PASS live read lease: revoke PENDING -> dispatcher ACK -> signed DRAINED
+  PASS concurrent registration/revocation, durable tombstones and restart
+  PASS different-UID config DB/WAL/SHM denial and independent field merge
+  PASS offline corruption recovery; original retained, new epoch/directory
+  Added task_records.py to fixture's closed copy list after 7B-8 schema dependency.
+  This is Linux isolation, NOT macOS Developer ID Host/service acceptance.
+
+UI:
+node scripts/test-host-panel.cjs ../orca
+  PASS headless Chromium fixture + disposable SQLite.
+ORCA_BACKGROUND_LAUNCH=1 node scripts/test-host-electron.cjs ../orca \
+  /tmp/orca-7b9-final/toolkit-host /tmp/orca-7b9-window.cjs /tmp/orca-7b9-authority.cjs
+  PASS actual hidden Electron 1000x900; actual production window + preload;
+  real service store via synthetic adapter; native-dialog responses injected.
+  Preview, Cancel/Allow, edits, backup/restore, leased target restrictions,
+  owner redaction, second WebContents rejection; sealed engine creation/list.
+  Screenshot: /tmp/toolkit-host-electron-7b9.png (temporary local evidence).
+  No show/focus/activation. No production endpoint or download was contacted.
+  Local $electron skill unavailable; custom Playwright driver is supplemental.
+
+Build/UI reproduction from Orca, pinned Node 24.22.1 / pnpm 12.14.0:
+pnpm exec esbuild native/toolkit-host/authority-test-entry.mjs --bundle \
+  --platform=node --format=cjs --outfile=/tmp/orca-7b9-authority.cjs
+pnpm exec esbuild src/main/toolkit/toolkit-window.ts --bundle --platform=node \
+  --format=cjs --external:electron --outfile=/tmp/orca-7b9-window.cjs
+node native/toolkit-host/stage.mjs ../orca-tools /tmp/NEW/toolkit-host \
+  /path/to/pinned/bin/node /path/to/pinned/include/node
+node native/toolkit-host/seal.mjs /tmp/NEW/toolkit-host - --test-only
+ORCA_BACKGROUND_LAUNCH=1 node native/toolkit-host/smoke-worker.mjs /tmp/NEW
+  PASS closed resource manifest, actual ad-hoc nested signatures,
+  independent Node worker real IPC, no RUN_AS_NODE, no private API discovery.
+
+Orca targeted tests:
+ORCA_BACKGROUND_LAUNCH=1 pnpm test src/main/toolkit \
+  src/main/plugins/workers/plugin-worker-supervision.integration.test.ts \
+  src/main/menu/register-app-menu.test.ts --maxWorkers=2
+  62 pass / 1 platform skip, 6 files.
+Orca required final gate (after staging new files):
+ORCA_BACKGROUND_LAUNCH=1 pnpm check:changed \
+  --base=baseline/installed-1.4.249 --maxWorkers=2
+  PASS: 22/22 checks, 36 selected changed files, all new production files staged.
+  Includes three TypeScript projects, lint/format, changed-code quality,
+  import boundaries, unit tests and selected ratchets. No gate was relaxed.
+python3 scripts/check.py; git diff --check (both repositories)
+  PASS source/private-data hygiene and patch whitespace.
+
+FORMAL SIGNING
+security find-identity -v -p codesigning: 0 valid identities found.
+scripts/check-host-release.py rejects a non-app staging directory (negative only).
+No positive Developer ID build, notary submission/staple, x64/Rosetta or macOS
+cross-UID acceptance. No authentication test was skipped or loosened for green.
+
+FIXED FAILURES / LIMITS
+- Initial VM UI test exposed async initialization ordering after adding downloads;
+  kept the existing observable initialization promise (17 focused tests passed).
+- Actual Electron first-load IPC raced context admission; fixed with main ready
+  notification. Repeat hidden-window check passed using final staged sources.
+- First broad remote Python discovery used the wrong environment: secure_store
+  import missing and Docker-only isolation assertion refused macOS. Re-ran unit
+  tests with PYTHONPATH and the real isolation script in a disposable container.
+- Orphan/legacy/no-registration-proof cleanup stays blocked, not auto-released.
+- Remote browser/preferences/open-folder parity, native human dialog acceptance,
+  generic runtime/fuse/entitlement work and formal signed deployment remain open.

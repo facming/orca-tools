@@ -42,6 +42,6 @@ class AccountPreferences {
   }catch{throw new ToolkitError('Account preferences could not be saved. Check local permissions or changes to the file.');}
   finally{if(created&&fs.existsSync(temp))fs.unlinkSync(temp);}
  }
- apply(environment,state){return {...state,accounts:state.accounts.map(a=>({...a,disabled:this.disabled(environment,a.id)}))};}
+ apply(environment,state){return {...state,accounts:state.accounts.map(a=>({...a,disabled:a.source!=='system-default'&&this.disabled(environment,a.id)}))};}
 }
 module.exports={AccountPreferences};

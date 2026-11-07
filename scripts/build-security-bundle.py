@@ -14,7 +14,7 @@ a=p.parse_args()
 root=Path(__file__).resolve().parents[1];out=Path(a.output)
 out.mkdir(mode=0o755)  # no overwrite
 source=root/'plugins/toolkit/config-service'
-for name in ('service.py','config_store.py','secure_store.py','ipc.py','recover.py'):
+for name in ('service.py','config_store.py','task_records.py','secure_store.py','ipc.py','recover.py'):
     shutil.copyfile(source/name,out/name)
 subprocess.run(['cc','-Wall','-Wextra',str(source/'bridge.c'),'-o',str(out/'config-bridge')],check=True)
 subprocess.run(['cc','-dynamiclib',str(source/'peer_identity.c'),'-framework','Security','-framework','CoreFoundation','-o',str(out/'peer_identity.dylib')],check=True)

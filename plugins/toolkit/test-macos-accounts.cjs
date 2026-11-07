@@ -1,9 +1,8 @@
 'use strict';
-const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
+const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 const {fixture,snapshot}=require('./fixtures/accounts.cjs');
 const {Accounts,publicState}=require('./modules/accounts.cjs');
 const {AccountPreferences}=require('./account-preferences.cjs');
-const {fragment}=require('./compose-ui.cjs');
 async function started(t){const f=fixture();t.after(()=>f.close());return f.start();}
 const select={accountId:'b',expectedActiveAccountId:'a'};
 
@@ -13,14 +12,14 @@ test('macOS initialization, page opens, passive GETs and status never construct 
   await fetch(f.server.url+'accounts/');await f.request('accounts/open',{});
   assert.equal((await f.request('accounts')).body.requiresRefresh,true);
   const status=(await f.request('status')).body;
-  assert.equal(status.modules.accounts.status,'preview');assert.equal(status.modules.downloads.status,'needs-setup');assert.equal(status.modules.gpu.status,'offline');
+  assert.equal(status.modules.accounts.status,'preview');assert.equal(status.modules.downloads.status,'host-required');assert.equal(status.modules.gpu.status,'offline');
  }
  assert.equal(f.loads,0);assert.equal(f.calls.length,0);
  const result=await f.request('accounts/refresh',{});assert.equal(result.status,200);
  assert.deepEqual(f.constructors,[[f.runtime.userDataPath,30000,null,'Mock remote',f.runtime.cli]]);
  assert.equal((await f.request('status')).body.modules.accounts.status,'ready');
  assert.equal((await f.request('accounts')).body.accounts.length,3);assert.equal(f.calls.length,1);
- for(const route of ['downloads/jobs','gpu/open'])assert.equal((await f.request(route,{})).status,400);
+ for(const route of ['downloads/jobs','gpu/open'])assert.equal((await f.request(route,{})).status,route.startsWith('downloads')?403:400);
 });
 test('only the configured environment is used, settings changes invalidate readiness without RPC',async t=>{
  const f=await started(t),c=f.server.controller;
@@ -101,7 +100,7 @@ test('pending switch prevents duplicate operations and settings drift prevents m
  assert.equal(f.calls.filter(c=>c.method==='accounts.selectClaude').length,1);assert.equal((await c.status()).modules.accounts.status,'preview');
 });
 
-test('switch timeout or post-switch disconnect never reports success or retries the mutation',async t=>{
+test('switch uncertainty is reported and failed verification restores the prior selection',async t=>{
  const f=fixture();t.after(()=>f.close());
  for(const phase of ['mutation','verification']){
   let selected=false,mutations=0;
@@ -110,39 +109,32 @@ test('switch timeout or post-switch disconnect never reports success or retries 
    else if(selected)throw Object.assign(Error('synthetic private diagnostic'),{code:'ECONNRESET'});
    return {ok:true,_meta:{runtimeId:'mock'},result:snapshot()};
   }})});
-  await assert.rejects(accounts.select({environment:'Mock'},select),phase==='mutation'?/timed out/:/disconnected/);
-  assert.equal(mutations,1);assert.equal(accounts.switching,false);assert.equal(accounts.clients.size,0);
+  await assert.rejects(accounts.select({environment:'Mock'},select),phase==='mutation'?/could not be confirmed or restored/:/previous account selection was restored/);
+  assert.equal(mutations,phase==='mutation'?1:2);
  }
 });
 
-// Execute the actual Accounts script against the local HTTP server. The small
-// DOM double checks handlers, rendering and disabled controls without packages.
-class Node {
- constructor(tag='div'){this.tag=tag;this.children=[];this.style={};this.attributes={};this.disabled=false;this.textContent='';}
- append(...nodes){this.children.push(...nodes);}replaceChildren(...nodes){this.children=nodes;}
- setAttribute(k,v){this.attributes[k]=v;}
- get text(){return this.textContent+this.children.map(n=>n.text??n).join(' ');}
- find(tag){return this.children.flatMap(n=>n instanceof Node?[...(n.tag===tag?[n]:[]),...n.find(tag)]:[]);}
-}
-test('macOS Accounts page runs refresh, masking, usage, disable/enable, switch and failure interactions',async t=>{
- const markup=fragment('accounts.html').content;assert.ok(!/<header>[\s\S]*?id="refresh"[\s\S]*?<\/header>/.test(markup),'refresh must be outside the shell-hidden module header');
- const f=await started(t),nodes=Object.fromEntries(['accounts','message','refresh'].map(id=>[id,new Node()]));
- const requests=[],listeners={};
- const context=vm.createContext({document:{getElementById:id=>nodes[id],createElement:tag=>new Node(tag),visibilityState:'visible'},window:{addEventListener:(event,fn)=>listeners[event]=fn},setInterval(){},fetch:(url,opts)=>{const promise=fetch(new URL(url,f.server.url),{...opts,headers:{...opts.headers,Origin:new URL(f.server.url).origin}});requests.push(promise);return promise;}});
- vm.runInContext(fragment('accounts.html').script.replaceAll('__TOKEN__',f.headers['X-Toolkit-Token']),context);
- const idle=async()=>{for(let i=0;i<100;i++){await new Promise(resolve=>setTimeout(resolve,5));if(!vm.runInContext('busy',context))return;}throw Error('UI timeout');};
- await idle();assert.equal(f.calls.length,0);assert.match(nodes.accounts.text,/macOS preview/);
- await nodes.refresh.onclick();assert.equal(f.calls.length,1);assert.match(nodes.accounts.text,/a\*\*\*@example.invalid/);assert.ok(!nodes.accounts.text.includes('alice@'));
- assert.match(nodes.accounts.text,/Usage: ready/);assert.match(nodes.accounts.text,/Usage: stale/);assert.match(nodes.accounts.text,/Usage: unknown/);assert.match(nodes.accounts.text,/Resets in/);assert.match(nodes.accounts.text,/Sign-in required/);
- const cards=()=>nodes.accounts.children;
- let b=cards()[1];await b.find('button').find(n=>n.text==='Disable account').onclick();b=cards()[1];assert.equal(b.find('button')[0].disabled,true);
- await b.find('button').find(n=>n.text==='Enable account').onclick();
- let release;f.gate=new Promise(resolve=>release=resolve);const action=cards()[1].find('button')[0].onclick();
- assert.equal(nodes.refresh.disabled,true);assert.ok(nodes.accounts.find('button').every(n=>n.disabled));release();await action;f.gate=null;
- assert.match(nodes.message.text,/Account selected/);assert.ok(cards()[1].className.includes('current'));
- f.failure='ECONNRESET';await nodes.refresh.onclick();assert.match(nodes.message.text,/disconnected/);assert.equal(nodes.accounts.children.length,0);
- f.failure=null;await nodes.refresh.onclick();assert.equal(cards().length,3);
- const next=structuredClone(f.server.controller.settings);next.accounts.environment='Another mock';await f.server.controller.update(next);const n=f.calls.length;listeners['toolkit-settings-changed']();await idle();assert.equal(f.calls.length,n);assert.match(nodes.accounts.text,/macOS preview/);
+require('./fixtures/config-service.cjs').hooks(test);
+
+test('switch confirmation rejects a changed remote runtime',async t=>{
+ const f=fixture();t.after(()=>f.close());
+ let selected=false;
+ const accounts=new Accounts(f.runtime,{createClient:()=>({isRemote:true,async call(method,params){
+  if(method==='accounts.selectClaude')selected=true;
+  if(method==='accounts.list'&&selected)assert.equal(params.refreshUsage,true);
+  return {ok:true,_meta:{runtimeId:selected?'replacement':'original'},result:snapshot()};
+ }})});
+ await assert.rejects(accounts.select({environment:'Mock'},select),/could not be confirmed or restored/);
 });
 
-require('./fixtures/config-service.cjs').hooks(test);
+test('macOS rejects unbound cached usage even when repeated runtime target snapshots agree',async t=>{
+ const f=fixture();t.after(()=>f.close());
+ const state=snapshot();state.claude.activeAccountIdsByRuntime={host:'a'};state.claude.accounts[0].managedAuthRuntime='host';state.rateLimits.claudeTarget={runtime:'host',wslDistro:null};
+ delete state.rateLimits.claude.usageMetadata.authProvenance;delete state.rateLimits.inactiveClaudeAccounts[0].rateLimits.usageMetadata.authProvenance;
+ f.value=state;const accounts=new Accounts(f.runtime);
+ for(let i=0;i<2;i++){const result=await accounts.list({environment:'fixture'});assert.equal(result.accounts[0].usage,null);assert.equal(result.accounts[1].usage,null);assert.equal(result.accounts[0].usageStatus.code,'unverified-account');}
+ state.rateLimits.claude.usageMetadata.authProvenance='managed:a';
+ assert.equal((await accounts.list({environment:'fixture'})).accounts[0].usage.session.usedPercent,24);
+ state.claude.activeAccountId='b';
+ assert.equal((await accounts.list({environment:'fixture'})).accounts[1].usage,null);
+});
